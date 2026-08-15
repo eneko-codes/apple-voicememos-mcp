@@ -1,0 +1,63 @@
+{
+  "manifest_version": "0.3",
+  "name": "apple-voicememos-mcp",
+  "display_name": "Voice Memos",
+  "version": "1.0.0",
+  "description": "List and transcribe Voice Memos recordings on this Mac, on device",
+  "long_description": "A local MCP server written in Swift for Voice Memos.\n\nVoice Memos has no framework and is not scriptable, so recordings are reached as files and transcribed with Apple's Speech framework.\n\nTranscription is forced on-device: the audio never leaves this Mac. It is also slow, so transcribe by id rather than sweeping the library.\n\nThe grant for transcription appears under System Settings → Privacy & Security → Speech Recognition.\n\nNothing here deletes or modifies a recording.\n\nNot affiliated with or endorsed by Apple Inc.",
+  "author": {
+    "name": "eneko-codes",
+    "url": "https://github.com/eneko-codes"
+  },
+  "homepage": "https://github.com/eneko-codes/apple-voicememos-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eneko-codes/apple-voicememos-mcp"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": [
+    "voice memos",
+    "transcription",
+    "speech",
+    "audio",
+    "macos"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/apple-voicememos-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/apple-voicememos-mcp",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "recordings_status",
+      "description": "Reports which recording library this server can reach, whether speech recognition is granted, whether the on-device model for the recognition locale is installed, and where exports and cached…"
+    },
+    {
+      "name": "recordings_list",
+      "description": "Lists recordings with their id, name, date, duration and folder, newest first. Returns one line each and says how many matches were withheld."
+    },
+    {
+      "name": "recording_get",
+      "description": "Returns everything stored about one or more recordings: name, file name, full path, folder, creation and modification dates, duration, size and file type. No audio and no transcript — use…"
+    },
+    {
+      "name": "recording_transcribe",
+      "description": "Transcribes recordings to text with Apple's Speech framework, forced to on-device recognition: the audio never leaves this Mac and no network request is made. Needs the Speech Recognition…"
+    },
+    {
+      "name": "recording_export",
+      "description": "Copies a recording's audio file into the configured export folder. The original is never moved, renamed or touched."
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin"
+    ]
+  }
+}
