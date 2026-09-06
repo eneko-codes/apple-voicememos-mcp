@@ -199,7 +199,7 @@ answered.
 
 - **No search over spoken words.** A phrase inside a recording can only be found by
   transcribing candidates and reading the text back.
-- **Transcription is capped and slow**, by design — see
+- **Transcription is capped per call**, by design — see
   [the rules above](#the-rules-worth-knowing-before-you-use-it).
 - **Nothing manages the library.** No rename, delete, move or re-record tool exists,
   and none is planned; `recording_export` writes a copy, it never touches the original.
@@ -214,12 +214,12 @@ swift build
 swift test
 ```
 
-43 tests, all against an in-memory fake (`FakeRecordingStore`) with invented recording
+46 tests, all against an in-memory fake (`FakeRecordingStore`) with invented recording
 names, durations and transcripts. They need no permissions and never touch a real
-recording — see `CLAUDE.md`, whose first section is the hard rule that makes that
-non-negotiable: an agent must never transcribe, export, modify or delete a real
-recording, and it may exercise the `Speech` path only against synthetic audio it
-generated itself, in a temporary directory, deleted in the same session.
+recording — they exercise the `Speech` path only against synthetic audio generated in
+the same session and deleted afterward, per `CLAUDE.md`. Its hard rule, which outranks
+everything else there: an agent must never modify, delete or move a recording the owner
+made.
 
 Manual verification against a live library is the owner's job; `verification.md` is
 the script for it.
