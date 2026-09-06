@@ -334,8 +334,18 @@ private actor SpeechTranscriber {
 
         var pieces: [String] = []
         for chunkURL in chunkURLs {
-            let text = try await recognize(url: chunkURL, locale: locale, recordingID: recordingID)
-            if !text.isEmpty { pieces.append(text) }
+            do {
+                let text = try await recognize(
+                    url: chunkURL, locale: locale, recordingID: recordingID)
+                if !text.isEmpty { pieces.append(text) }
+            } catch let error as ToolError {
+                // A chunk with too little signal to recognise — near-silence, a pause —
+                // throws rather than returning empty text, and one such chunk must not
+                // sink the chunks that came out fine. Whether the locale's on-device
+                // model is unusable, though, is true for every remaining chunk too:
+                // failing fast there beats repeating the same failure once per chunk.
+                if case .onDeviceUnavailable = error { throw error }
+            }
         }
         return pieces.joined(separator: " ")
     }
