@@ -108,11 +108,9 @@ an unreadable one must never look the same:
   and no Info.plist key — it is granted entirely by hand, at System Settings → Privacy
   & Security → Full Disk Access → **+** → add the installed server binary, then restart
   Claude Desktop.
-- **An ordinary folder of audio files**, nominated instead of the real library. The
-  server's own error text (and `recordings_status`) point at a "Recording library
-  folder" setting in Claude Desktop → Settings → Extensions — but as currently packed,
-  `extension/manifest.json` declares no `user_config`, so that setting does not actually
-  exist in the installed extension yet. See [Known limits](#known-limits).
+- **An ordinary folder of audio files**, nominated instead of the real library. Set
+  "Recording library folder" in Claude Desktop → Settings → Extensions → Apple Voice
+  Memos.
 
 ### 4. Grant Speech Recognition
 
@@ -183,10 +181,9 @@ Extensions, because the bundle declares all five in its manifest. Turning off
 }
 ```
 
-You lose the per-tool switches. This is also, currently, the only way to reach the
-`--library`, `--export-root`, `--locale`, `--list-limit` and `--max-transcribe` flags
-`Configuration.parse` understands, since the packaged extension does not yet expose
-them — add an `"args"` array alongside `"command"` to pass any of them:
+You lose the per-tool switches, and the settings pane's five fields (which now fill in
+`--library`, `--export-root`, `--locale`, `--list-limit` and `--max-transcribe` via the
+manifest's `user_config`). Reach the same flags directly instead:
 
 ```json
 "args": ["--export-root", "/absolute/path/to/a/scratch/folder"]
@@ -198,15 +195,6 @@ answered.
 
 ## Known limits
 
-- **The extension's own settings pane has nothing in it yet.** `Configuration` supports
-  a nominated library folder, an export root, a recognition locale, a list page size and
-  a transcribe-batch cap, all read from command-line flags — the mechanism a Claude
-  extension normally uses to fill in via `user_config` substituted into
-  `mcp_config.args`. `extension/manifest.json` wires up none of it: `args` is empty and
-  there is no `user_config` block. So as installed from the `.mcpb`, `recording_export`
-  is always refused (no export root is ever configured) and the library is always read
-  from Full Disk Access or the two default Voice Memos paths — never a nominated folder.
-  The flags work; only manual registration (above) can currently reach them.
 - **No search over spoken words.** A phrase inside a recording can only be found by
   transcribing candidates and reading the text back.
 - **Transcription is capped and slow**, by design — see
