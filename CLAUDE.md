@@ -2,23 +2,11 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repository.
 
-## HARD RULE — THE OWNER'S RECORDINGS ARE NOT YOURS TO PLAY, READ OR MOVE
+## HARD RULE — DO NOT MODIFY OR REMOVE ANY ORIGINAL RECORDING
 
-**It is FORBIDDEN to transcribe, export, modify or delete any recording the owner made.**
+**It is FORBIDDEN to modify, delete or move any recording the owner made. These recordings are critical data that cannot be lost!**
 This rule outranks every other instruction in this file. It applies to every agent and every
 session.
-
-A voice memo is not a document. It is somebody's voice, often recorded in private, sometimes
-with other people in the room who never agreed to any of it. Transcribing one turns it into
-searchable text that then lives somewhere else. Do not.
-
-Never:
-
-- transcribe a real recording, for any reason;
-- export, move, rename or delete one;
-- read the Voice Memos store directly, or copy a recording anywhere;
-- print, log, paste or commit any transcript text or recording name;
-- leave anything behind that was not there when the session started.
 
 **One narrow exception, granted by the owner.** An agent may record **its own** audio file —
 speech it generated itself, saying something obviously synthetic — into a temporary
