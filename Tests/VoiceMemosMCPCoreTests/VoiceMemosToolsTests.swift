@@ -42,7 +42,12 @@ struct VoiceMemosToolsTests {
         }
     }
 
-    @Test("Annotations match what each tool actually does")
+    /// The sibling servers put a create_/update_/delete_ prefix on writes. This server has
+    /// no such tool: it cannot change the recording library at all, and recording_export
+    /// only copies out of it. The convention is kept by having nothing to prefix — checked
+    /// here alongside the annotations, so a future write tool cannot arrive unnamed or
+    /// mismarked.
+    @Test("Annotations and naming both say nothing here modifies the library")
     func annotationsAreHonest() {
         let reads = [
             "recordings_status", "recordings_list", "recording_get", "recording_transcribe",
@@ -52,16 +57,6 @@ struct VoiceMemosToolsTests {
             // Nothing here destroys anything: the recording library is only ever read,
             // and the one tool that writes writes a copy elsewhere.
             #expect(tool.annotations.destructiveHint == false, "\(tool.name)")
-        }
-    }
-
-    /// The sibling servers put a create_/update_/delete_ prefix on writes. This server has
-    /// no such tool: it cannot change the recording library at all, and recording_export
-    /// only copies out of it. The convention is kept by having nothing to prefix, and this
-    /// test is what stops a future write tool from arriving unnamed.
-    @Test("No tool claims to modify the recording library")
-    func nothingWritesToTheLibrary() {
-        for tool in ToolCatalog.all() {
             let hasVerb = ["create_", "update_", "delete_"].contains { tool.name.hasPrefix($0) }
             #expect(!hasVerb, "\(tool.name) implies a write this server does not do")
         }
@@ -155,11 +150,8 @@ struct VoiceMemosToolsTests {
         #expect(ideaLine!.lowerBound < quarterlyLine!.lowerBound)
         #expect(result.text.contains("1:02:05"))
         #expect(result.text.contains("3 recording(s)"))
-    }
-
-    @Test("A recording at the library root prints as (root)")
-    func rootFolderIsLabelled() async {
-        let result = await call("recordings_list")
+        // A recording at the library root prints its folder as "(root)"; one filed under
+        // a real folder prints that folder's name.
         #expect(result.text.contains("(root)"))
         #expect(result.text.contains("Ideas"))
     }
