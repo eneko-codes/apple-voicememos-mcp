@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "apple-voicememos-mcp",
   "display_name": "Voice Memos",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "List and transcribe Voice Memos recordings on this Mac, on device",
   "long_description": "A local MCP server written in Swift for Voice Memos.\n\nVoice Memos has no framework and is not scriptable, so recordings are reached as files and transcribed with Apple's Speech framework.\n\nTranscription is forced on-device: the audio never leaves this Mac. It is also slow, so transcribe by id rather than sweeping the library.\n\nThe grant for transcription appears under System Settings → Privacy & Security → Speech Recognition.\n\nNothing here deletes or modifies a recording.\n\nNot affiliated with or endorsed by Apple Inc.",
   "author": {
