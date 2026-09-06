@@ -4,7 +4,7 @@ import MCP
 public enum VoiceMemosMCPServer {
 
     public static let name = "apple-voicememos-mcp"
-    public static let version = "1.0.5"
+    public static let version = "1.1.0"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: the id workflow, what transcription costs, and where policy actually lives.
@@ -24,11 +24,12 @@ public enum VoiceMemosMCPServer {
         Dates accept three forms: 2026-08-12 (that whole day), 2026-08-12T09:00 (local \
         time), or 2026-08-12T09:00:00+02:00 (explicit offset).
 
-        recording_transcribe is SLOW: on-device recognition takes roughly as long as the \
-        audio, nothing is reported until the batch finishes, and there is a cap on how \
-        many recordings one call may take. Transcribe what is actually needed. The audio \
-        never leaves this Mac — on-device recognition is forced, and a locale whose local \
-        model is missing is refused rather than sent to Apple.
+        recording_transcribe runs well faster than the length of the audio once a \
+        locale's on-device model is downloaded, but nothing is reported until the batch \
+        finishes, and there is a cap on how many recordings one call may take. Transcribe \
+        what is actually needed. The audio never leaves this Mac — this server's speech \
+        framework has no server-backed path at all, and a locale's model downloads \
+        automatically the first time that locale is used.
 
         There is no search over spoken words. Finding a phrase means transcribing the \
         candidates and reading them; the server will not transcribe a library to answer a \

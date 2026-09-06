@@ -44,9 +44,9 @@ public enum ToolError: Error, Equatable {
             return """
                 \(asked) recordings were asked for at once; the maximum is \(maximum).
 
-                On-device transcription runs at roughly real time, so a long batch keeps
-                the tool call open for minutes with nothing to show meanwhile. Split the
-                list, or raise the limit in Claude Desktop → Settings → Extensions.
+                Recognition itself is fast, but a locale's on-device model downloads on
+                first use and a large batch returns as one wall of text. Split the list, or
+                raise the limit in Claude Desktop → Settings → Extensions.
                 """
 
         case .notFound(let ids):
@@ -157,15 +157,14 @@ public enum ToolError: Error, Equatable {
                 """
         }
         return """
-            '\(support.localeIdentifier)' has a recogniser, but its on-device model is not
-            installed, and this server never sends audio to Apple's servers.
+            '\(support.localeIdentifier)' has a recogniser, but this server could not
+            arrange to install its on-device model, and it never sends audio to Apple's
+            servers as a fallback.
 
-            Install it by using dictation in that language once:
-              System Settings → Keyboard → Dictation → add the language, then dictate
-              a sentence
-              (Spanish UI: Ajustes del Sistema → Teclado → Dictado)
-
-            The download happens in the background and can take a few minutes.
+            recording_transcribe normally downloads a missing model itself the first time
+            it is needed — this message means that request itself could not be made.
+            Check this Mac has a network connection for the one-time download, then try
+            again.
             """
     }
 

@@ -71,13 +71,20 @@ the shared instance is the only one documented as safe from several threads.
 
 ## Invariants worth protecting
 
-- **Recognition is forced on-device.** `requiresOnDeviceRecognition` is set, so audio never
-  leaves this Mac. That is not a preference and must not become configurable: the whole
-  reason this is acceptable at all is that a private recording stays private. The tool
-  description says so, and it must keep saying so.
-- **Transcription is slow and bounded.** `maximumTranscribeCount` caps how many recordings
-  one call may process, because a sweep of a whole library would run for a very long time
-  and produce far more text than anyone asked for.
+- **Recognition is on-device by construction.** `SpeechAnalyzer`/`SpeechTranscriber`
+  (macOS 26, replacing `SFSpeechRecognizer`) have no server-backed path at all — there is no
+  flag to set or unset, unlike the old API. That is not a preference and must not become
+  configurable: the whole reason this is acceptable at all is that a private recording stays
+  private. The tool description says so, and it must keep saying so.
+- **A locale's on-device model downloads on first use, not through Dictation.** Verified by
+  hand: enabling a language in System Settings → Keyboard → Dictation does not install this
+  framework's model — it is a separate asset. `TranscriptionEngine.ensureInstalled` calls
+  `AssetInventory.assetInstallationRequest` itself rather than sending the owner to a
+  settings pane that would not help.
+- **`maximumTranscribeCount` bounds a batch anyway**, even though on-device recognition now
+  runs well faster than real time once a model is installed: a sweep of a whole library
+  would still return a wall of text nobody asked for, and a first-time model download is
+  still a real wait.
 - **Nothing is written back into Voice Memos.** No rename, no delete, no re-record. `Speech`
   produces text; the recording is untouched.
 - **`recording_export` writes only inside the configured export root**, and refuses
@@ -122,3 +129,23 @@ an empty library and an unreadable one must never look the same.
 
 **A linker-signed binary gets no TCC prompt.** `pack.sh` re-signs and prints the designated
 requirement; an empty line there means the build is broken in a way nothing else will show.
+
+## MCP servers
+
+Applies to any repository shipping an MCP server or Claude extension: an `initialize` handler, a tool catalogue, or a manifest packed into a `.mcpb`.
+
+**Shipping a rebuild**
+
+- **ALWAYS bump the version before packing.** The installer keys on the manifest `version` alone, so a changed build under an already-installed version offers only "Uninstall" — which removes the extension instead of updating it.
+- **Three files carry the version and must agree:** the manifest `version`, the server's own version constant (what `initialize` and the status tool report), and `CFBundleShortVersionString` in `Resources/Info.plist`. A test asserts all three; keep it.
+- **Installing does not restart the server.** The running process serves the old binary until the client is fully quit and reopened, so a fix can appear to fail while the old code is still answering. Verify what is actually running (`ps`, and the binary path the status tool prints) before trusting any result, and ask for a full restart, not just an install.
+- **Ad-hoc signing changes the cdhash on every rebuild**, so TCC forgets its grant and prompts again. Expected, not a fault — say so on handover.
+
+**Documentation the model reads**
+
+The server documents itself to a model, which acts on that text and cannot detect that it is wrong. Treat it as code, not prose.
+
+- Update it in the same commit as the behaviour: a new, renamed or removed tool; a change to what a tool does, refuses, defaults to or requires; a change in which permission governs what; a limitation callers must work around.
+- Four surfaces, all natural language: the server `instructions`, each tool `description`, each argument `description`, and the manifest's `tools` array and `long_description`. The manifest is read before the server has ever run, so a tool missing from it has no permission switch at all.
+- State what the schema cannot convey: which tool to call first, which identifiers go stale and why, what cannot be undone, which permission governs what, and which field to prefer when several would fit.
+- None of it takes effect until the client restarts. Say so on handover.

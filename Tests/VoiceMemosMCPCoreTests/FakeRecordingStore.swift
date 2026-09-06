@@ -42,7 +42,7 @@ final class FakeRecordingStore: RecordingStore, @unchecked Sendable {
 
     func libraries() -> [LibraryLocation] { locations }
 
-    func onDeviceSupport(locale: String?) -> OnDeviceSupport {
+    func onDeviceSupport(locale: String?) async -> OnDeviceSupport {
         guard let locale, !locale.isEmpty else { return onDevice }
         return OnDeviceSupport(
             localeIdentifier: locale,

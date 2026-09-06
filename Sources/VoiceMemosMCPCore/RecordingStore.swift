@@ -17,7 +17,7 @@ public protocol RecordingStore: Sendable {
     func libraries() -> [LibraryLocation]
 
     /// On-device capability for a locale, asked before a transcription is started.
-    func onDeviceSupport(locale: String?) -> OnDeviceSupport
+    func onDeviceSupport(locale: String?) async -> OnDeviceSupport
 
     func list(_ query: RecordingQuery) async throws -> RecordingPage
 

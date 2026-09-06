@@ -21,7 +21,7 @@ public struct SystemRecordingStore: RecordingStore {
     static let audioExtensions: Set<String> = ["m4a", "mp3", "wav", "aiff", "aif", "caf", "mp4"]
 
     private let configuration: Configuration
-    private let transcriber = SpeechTranscriber()
+    private let engine = TranscriptionEngine()
 
     /// `FileManager.default` is used directly rather than held or injected. A stored
     /// `FileManager` cannot cross into a `Sendable` type — the class is not `Sendable` —
@@ -57,17 +57,20 @@ public struct SystemRecordingStore: RecordingStore {
         }
     }
 
-    public func onDeviceSupport(locale: String?) -> OnDeviceSupport {
+    public func onDeviceSupport(locale: String?) async -> OnDeviceSupport {
         let resolved = Self.locale(locale)
-        guard let recognizer = SFSpeechRecognizer(locale: resolved) else {
+        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: resolved)
+        else {
             return OnDeviceSupport(
                 localeIdentifier: resolved.identifier, recognizerExists: false,
                 supportsOnDevice: false)
         }
+        let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
+        let status = await AssetInventory.status(forModules: [transcriber])
         return OnDeviceSupport(
             localeIdentifier: resolved.identifier,
             recognizerExists: true,
-            supportsOnDevice: recognizer.supportsOnDeviceRecognition)
+            supportsOnDevice: status == .installed)
     }
 
     static func locale(_ identifier: String?) -> Locale {
@@ -248,7 +251,7 @@ public struct SystemRecordingStore: RecordingStore {
     public func transcribe(_ recording: RecordingDetail, locale: String?) async throws -> Transcript
     {
         let resolved = Self.locale(locale)
-        let text = try await transcriber.transcribe(
+        let text = try await engine.transcribe(
             url: URL(fileURLWithPath: recording.path), locale: resolved,
             recordingID: recording.id)
         return Transcript(
@@ -307,150 +310,78 @@ public struct SystemRecordingStore: RecordingStore {
     }
 }
 
-/// Serialises speech recognition.
+/// Runs on-device recognition through `SpeechAnalyzer`/`SpeechTranscriber` (macOS 26),
+/// the long-form replacement for `SFSpeechRecognizer`.
 ///
-/// `SFSpeechRecognizer` is not `Sendable` and an on-device pass is heavy in both CPU and
-/// memory; one at a time keeps the cost of a batch predictable and keeps the recogniser
-/// confined to a single isolation domain.
-private actor SpeechTranscriber {
-
-    /// On-device recognition run as a single session over a long file is unreliable well
-    /// before any Mac's memory limit — multiple independent reports describe it silently
-    /// truncating or dropping everything past roughly a minute, with no error to catch.
-    /// Splitting into fresh recognition sessions is the workaround every account of this
-    /// converges on, so a recording longer than this is chunked before recognition rather
-    /// than handed to `SFSpeechRecognizer` whole.
-    static let chunkDuration: TimeInterval = 55
-
+/// The old, short-form API ran a single recognition session over the whole file and was
+/// unreliable well past a minute of audio — independent reports describe it silently
+/// truncating or dropping everything past that point, with no error to catch. This module
+/// is what Apple built to fix that at the source: it is designed to take a long, whole
+/// recording in one call, with no chunking or stitching needed on this side. There is also
+/// no on-device flag to set here, unlike the old API — this framework has no server-backed
+/// path at all, so audio never has a way to leave this Mac in the first place.
+///
+/// One recognition session at a time: whether the platform supports running two on-device
+/// sessions concurrently is an open question in Apple's own developer forums rather than a
+/// documented guarantee, and this model runs well faster than real time on its own, so
+/// queuing a batch costs little a parallel run would have saved.
+private actor TranscriptionEngine {
     func transcribe(url: URL, locale: Locale, recordingID: String) async throws -> String {
-        let asset = AVURLAsset(url: url)
-        let duration = CMTimeGetSeconds(try await asset.load(.duration))
-        guard duration.isFinite, duration > Self.chunkDuration else {
-            return try await recognize(url: url, locale: locale, recordingID: recordingID)
-        }
-
-        let chunkURLs = try await Self.split(asset, recordingID: recordingID)
-        defer { for chunkURL in chunkURLs { try? FileManager.default.removeItem(at: chunkURL) } }
-
-        var pieces: [String] = []
-        for chunkURL in chunkURLs {
-            do {
-                let text = try await recognize(
-                    url: chunkURL, locale: locale, recordingID: recordingID)
-                if !text.isEmpty { pieces.append(text) }
-            } catch let error as ToolError {
-                // A chunk with too little signal to recognise — near-silence, a pause —
-                // throws rather than returning empty text, and one such chunk must not
-                // sink the chunks that came out fine. Whether the locale's on-device
-                // model is unusable, though, is true for every remaining chunk too:
-                // failing fast there beats repeating the same failure once per chunk.
-                if case .onDeviceUnavailable = error { throw error }
-            }
-        }
-        return pieces.joined(separator: " ")
-    }
-
-    /// Cuts `asset` into passthrough segments of `chunkDuration` under `$TMPDIR`. Passthrough
-    /// re-packages the existing encoded samples rather than re-encoding, so a chunk boundary
-    /// costs no audio quality — the caller is responsible for deleting the files it gets back.
-    private static func split(_ asset: AVURLAsset, recordingID: String) async throws -> [URL] {
-        let totalSeconds = CMTimeGetSeconds(try await asset.load(.duration))
-        var chunkURLs: [URL] = []
-        var start: TimeInterval = 0
-        while start < totalSeconds {
-            guard
-                let session = AVAssetExportSession(
-                    asset: asset, presetName: AVAssetExportPresetPassthrough)
-            else {
-                throw ToolError.transcriptionFailed(
-                    id: recordingID, detail: "could not prepare the audio for chunked recognition"
-                )
-            }
-            session.timeRange = CMTimeRange(
-                start: CMTime(seconds: start, preferredTimescale: 600),
-                duration: CMTime(
-                    seconds: min(chunkDuration, totalSeconds - start), preferredTimescale: 600))
-            let chunkURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("apple-voicememos-mcp-chunk-\(UUID().uuidString).m4a")
-            do {
-                try await session.export(to: chunkURL, as: .m4a)
-            } catch {
-                for url in chunkURLs { try? FileManager.default.removeItem(at: url) }
-                throw ToolError.transcriptionFailed(
-                    id: recordingID, detail: "could not chunk the audio: \(error.localizedDescription)"
-                )
-            }
-            chunkURLs.append(chunkURL)
-            start += chunkDuration
-        }
-        return chunkURLs
-    }
-
-    private func recognize(url: URL, locale: Locale, recordingID: String) async throws -> String {
-        guard let recognizer = SFSpeechRecognizer(locale: locale) else {
+        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale)
+        else {
             throw ToolError.onDeviceUnavailable(
                 OnDeviceSupport(
                     localeIdentifier: locale.identifier, recognizerExists: false,
                     supportsOnDevice: false))
         }
-        guard recognizer.supportsOnDeviceRecognition else {
+        let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
+        try await Self.ensureInstalled(transcriber, locale: locale)
+
+        let audioFile: AVAudioFile
+        do {
+            audioFile = try AVAudioFile(forReading: url)
+        } catch {
+            throw ToolError.transcriptionFailed(
+                id: recordingID, detail: "could not open the audio: \(error.localizedDescription)"
+            )
+        }
+
+        do {
+            // `finishAfterFile` is what makes this a one-shot call: the analyzer reads the
+            // file to its end and then finishes on its own, which is also what lets the
+            // `for try await` below end instead of waiting for a result that never comes.
+            let analyzer = try await SpeechAnalyzer(
+                inputAudioFile: audioFile, modules: [transcriber], finishAfterFile: true)
+            var pieces: [String] = []
+            for try await result in transcriber.results {
+                let text = String(result.text.characters)
+                if !text.isEmpty { pieces.append(text) }
+            }
+            withExtendedLifetime(analyzer) {}
+            return pieces.joined(separator: " ")
+        } catch {
+            throw ToolError.transcriptionFailed(id: recordingID, detail: error.localizedDescription)
+        }
+    }
+
+    /// Downloads this locale's model the first time it is needed.
+    ///
+    /// Verified by hand: the classic Dictation language list (System Settings → Keyboard →
+    /// Dictation) does not install this — this framework's model is a separate asset, and
+    /// `es-ES` came back not installed here even with Dictation already showing it enabled.
+    /// `AssetInventory` is the actual, current way to get it, and it is exactly what an app
+    /// is meant to call rather than sending the owner to a settings pane that would not help.
+    private static func ensureInstalled(_ transcriber: SpeechTranscriber, locale: Locale) async throws {
+        guard await AssetInventory.status(forModules: [transcriber]) != .installed else { return }
+        guard
+            let request = try await AssetInventory.assetInstallationRequest(
+                supporting: [transcriber])
+        else {
             throw ToolError.onDeviceUnavailable(
                 OnDeviceSupport(
                     localeIdentifier: locale.identifier, recognizerExists: true,
                     supportsOnDevice: false))
         }
-        guard recognizer.isAvailable else {
-            throw ToolError.transcriptionFailed(
-                id: recordingID,
-                detail: "the recogniser for \(locale.identifier) is not available right now")
-        }
-
-        let request = SFSpeechURLRecognitionRequest(url: url)
-        // The whole point of this tool: with this flag the audio is processed by the
-        // model on this Mac and no part of it is sent to Apple. Without it, Speech falls
-        // back to a server request, which is exactly what a private recording must never
-        // do.
-        request.requiresOnDeviceRecognition = true
-        // Partial results would fire the handler repeatedly for a result nobody can use:
-        // nothing is streamed anywhere, the answer is returned once at the end.
-        request.shouldReportPartialResults = false
-        request.addsPunctuation = true
-
-        return try await withCheckedThrowingContinuation { continuation in
-            let box = ContinuationBox(continuation)
-            recognizer.recognitionTask(with: request) { result, error in
-                if let error {
-                    box.finish(
-                        .failure(
-                            ToolError.transcriptionFailed(
-                                id: recordingID, detail: error.localizedDescription)))
-                    return
-                }
-                guard let result, result.isFinal else { return }
-                box.finish(.success(result.bestTranscription.formattedString))
-            }
-        }
-    }
-}
-
-/// Resumes a continuation exactly once.
-///
-/// `recognitionTask`'s handler can be called more than once, and can be called with both
-/// a final result and a later error. Resuming a checked continuation twice is a crash, so
-/// the guard is not defensive padding — it is the contract.
-private final class ContinuationBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<String, Error>?
-
-    init(_ continuation: CheckedContinuation<String, Error>) {
-        self.continuation = continuation
-    }
-
-    func finish(_ outcome: Result<String, Error>) {
-        lock.lock()
-        let pending = continuation
-        continuation = nil
-        lock.unlock()
-        pending?.resume(with: outcome)
+        try await request.downloadAndInstall()
     }
 }
