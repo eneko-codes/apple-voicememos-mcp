@@ -4,7 +4,15 @@ import Foundation
 public enum LibraryOrigin: String, Sendable, Equatable {
     /// Set by the person installing the extension.
     case configured
+    /// The shared Group Container Voice Memos and its Watch companion both write into.
+    /// Confirmed by hand on macOS 26 (Tahoe): the app's own private container no longer
+    /// holds any recording at all, not even unreadable — Voice Memos moved its library
+    /// here, presumably so the Watch app can reach the same files without going through
+    /// the other app's sandbox.
+    case voiceMemosSharedGroupContainer
     /// The Voice Memos app's own sandbox container. Readable only with Full Disk Access.
+    /// Still tried for whichever macOS release used this before the move to the shared
+    /// Group Container above.
     case voiceMemosContainer
     /// The pre-sandbox location. Still documented in the wild and cheap to check.
     case legacyApplicationSupport
