@@ -4,7 +4,7 @@ import MCP
 public enum VoiceMemosMCPServer {
 
     public static let name = "apple-voicememos-mcp"
-    public static let version = "1.1.0"
+    public static let version = "1.1.1"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: the id workflow, what transcription costs, and where policy actually lives.
