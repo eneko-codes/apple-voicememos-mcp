@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 import Speech
 
@@ -79,10 +80,9 @@ public struct SystemRecordingStore: RecordingStore {
     /// Candidate roots, in the order they are tried.
     ///
     /// The container path is where Voice Memos actually keeps its recordings on a
-    /// sandboxed macOS, and it answers `Operation not permitted` without Full Disk
-    /// Access — verified on this Mac. The pre-sandbox path is checked after it because it
-    /// is still what most documentation names, and a directory that is simply absent
-    /// costs one `stat` to rule out.
+    /// sandboxed macOS. The pre-sandbox path is checked after it because it is still what
+    /// most documentation names, and a directory that is simply absent costs one `stat` to
+    /// rule out.
     public func libraries() -> [LibraryLocation] {
         let home = fileManager.homeDirectoryForCurrentUser.path
         var candidates: [(String, LibraryOrigin)] = []
@@ -99,17 +99,32 @@ public struct SystemRecordingStore: RecordingStore {
                 .legacyApplicationSupport))
 
         return candidates.map { path, origin in
-            var isDirectory: ObjCBool = false
-            let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
-            // Listing it is the only test that means anything: the container exists for
-            // everyone and refuses to be read for almost everyone.
-            let readable =
-                exists && isDirectory.boolValue
-                && (try? fileManager.contentsOfDirectory(atPath: path)) != nil
-            return LibraryLocation(
-                path: path, origin: origin, exists: exists && isDirectory.boolValue,
-                isReadable: readable)
+            let (exists, readable) = Self.probe(path, fileManager: fileManager)
+            return LibraryLocation(path: path, origin: origin, exists: exists, isReadable: readable)
         }
+    }
+
+    /// Distinguishes "nothing here" from "something here this process is not let see".
+    ///
+    /// `FileManager.fileExists` calls `stat` and turns *any* failure into `false` —
+    /// genuine absence (`ENOENT`) and a TCC denial at the `stat` call itself (`EACCES` /
+    /// `EPERM`, which is exactly what the sandboxed Voice Memos container returns without
+    /// Full Disk Access) are indistinguishable through that API. Reading `errno` after a
+    /// raw `stat` is the only way to tell "missing" from "unreadable", and getting that
+    /// wrong sends someone hunting for a folder that is actually there.
+    private static func probe(_ path: String, fileManager: FileManager) -> (
+        exists: Bool, isReadable: Bool
+    ) {
+        var info = stat()
+        guard path.withCString({ stat($0, &info) }) == 0 else {
+            switch errno {
+            case ENOENT, ENOTDIR: return (false, false)
+            default: return (true, false)
+            }
+        }
+        guard (info.st_mode & S_IFMT) == S_IFDIR else { return (false, false) }
+        let readable = (try? fileManager.contentsOfDirectory(atPath: path)) != nil
+        return (true, readable)
     }
 
     private func libraryRoot() throws -> URL {
