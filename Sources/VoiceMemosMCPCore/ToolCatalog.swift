@@ -164,6 +164,10 @@ public enum ToolCatalog {
                 \(configuration.maximumTranscribeCount) recordings per call. Ask for the \
                 ones that are actually needed rather than a whole listing.
 
+                A recording longer than about a minute is split into several on-device \
+                recognition passes and stitched back together: a single long pass \
+                otherwise tends to silently drop everything past roughly a minute.
+
                 The text is what the recogniser heard, punctuation included and nothing \
                 else: no summary, no speaker labels, no cleanup.
                 """,

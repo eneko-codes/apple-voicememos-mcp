@@ -314,7 +314,69 @@ public struct SystemRecordingStore: RecordingStore {
 /// confined to a single isolation domain.
 private actor SpeechTranscriber {
 
+    /// On-device recognition run as a single session over a long file is unreliable well
+    /// before any Mac's memory limit — multiple independent reports describe it silently
+    /// truncating or dropping everything past roughly a minute, with no error to catch.
+    /// Splitting into fresh recognition sessions is the workaround every account of this
+    /// converges on, so a recording longer than this is chunked before recognition rather
+    /// than handed to `SFSpeechRecognizer` whole.
+    static let chunkDuration: TimeInterval = 55
+
     func transcribe(url: URL, locale: Locale, recordingID: String) async throws -> String {
+        let asset = AVURLAsset(url: url)
+        let duration = CMTimeGetSeconds(try await asset.load(.duration))
+        guard duration.isFinite, duration > Self.chunkDuration else {
+            return try await recognize(url: url, locale: locale, recordingID: recordingID)
+        }
+
+        let chunkURLs = try await Self.split(asset, recordingID: recordingID)
+        defer { for chunkURL in chunkURLs { try? FileManager.default.removeItem(at: chunkURL) } }
+
+        var pieces: [String] = []
+        for chunkURL in chunkURLs {
+            let text = try await recognize(url: chunkURL, locale: locale, recordingID: recordingID)
+            if !text.isEmpty { pieces.append(text) }
+        }
+        return pieces.joined(separator: " ")
+    }
+
+    /// Cuts `asset` into passthrough segments of `chunkDuration` under `$TMPDIR`. Passthrough
+    /// re-packages the existing encoded samples rather than re-encoding, so a chunk boundary
+    /// costs no audio quality — the caller is responsible for deleting the files it gets back.
+    private static func split(_ asset: AVURLAsset, recordingID: String) async throws -> [URL] {
+        let totalSeconds = CMTimeGetSeconds(try await asset.load(.duration))
+        var chunkURLs: [URL] = []
+        var start: TimeInterval = 0
+        while start < totalSeconds {
+            guard
+                let session = AVAssetExportSession(
+                    asset: asset, presetName: AVAssetExportPresetPassthrough)
+            else {
+                throw ToolError.transcriptionFailed(
+                    id: recordingID, detail: "could not prepare the audio for chunked recognition"
+                )
+            }
+            session.timeRange = CMTimeRange(
+                start: CMTime(seconds: start, preferredTimescale: 600),
+                duration: CMTime(
+                    seconds: min(chunkDuration, totalSeconds - start), preferredTimescale: 600))
+            let chunkURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("apple-voicememos-mcp-chunk-\(UUID().uuidString).m4a")
+            do {
+                try await session.export(to: chunkURL, as: .m4a)
+            } catch {
+                for url in chunkURLs { try? FileManager.default.removeItem(at: url) }
+                throw ToolError.transcriptionFailed(
+                    id: recordingID, detail: "could not chunk the audio: \(error.localizedDescription)"
+                )
+            }
+            chunkURLs.append(chunkURL)
+            start += chunkDuration
+        }
+        return chunkURLs
+    }
+
+    private func recognize(url: URL, locale: Locale, recordingID: String) async throws -> String {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             throw ToolError.onDeviceUnavailable(
                 OnDeviceSupport(
