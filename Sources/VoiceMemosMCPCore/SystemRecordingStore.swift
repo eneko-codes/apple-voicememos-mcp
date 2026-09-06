@@ -79,16 +79,23 @@ public struct SystemRecordingStore: RecordingStore {
 
     /// Candidate roots, in the order they are tried.
     ///
-    /// The container path is where Voice Memos actually keeps its recordings on a
-    /// sandboxed macOS. The pre-sandbox path is checked after it because it is still what
-    /// most documentation names, and a directory that is simply absent costs one `stat` to
-    /// rule out.
+    /// The shared Group Container is tried first: confirmed by hand on macOS 26 as where
+    /// Voice Memos actually keeps its recordings now, with its own private container
+    /// holding none at all — not even an unreadable one, genuinely empty of them. The
+    /// private container and the pre-sandbox path are kept as fallbacks for whichever
+    /// macOS release used them before this move, and a directory that is simply absent
+    /// costs one `stat` to rule out.
     public func libraries() -> [LibraryLocation] {
         let home = fileManager.homeDirectoryForCurrentUser.path
         var candidates: [(String, LibraryOrigin)] = []
         if let configured = configuration.libraryPath {
             candidates.append((configured, .configured))
         }
+        candidates.append(
+            (
+                "\(home)/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings",
+                .voiceMemosSharedGroupContainer
+            ))
         candidates.append(
             (
                 "\(home)/Library/Containers/com.apple.VoiceMemos/Data/Library/Application Support/com.apple.voicememos/Recordings",

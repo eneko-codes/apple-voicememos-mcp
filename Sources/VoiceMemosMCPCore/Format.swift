@@ -210,6 +210,7 @@ extension LibraryOrigin {
     var label: String {
         switch self {
         case .configured: return "configured in the extension settings"
+        case .voiceMemosSharedGroupContainer: return "Voice Memos shared Group Container"
         case .voiceMemosContainer: return "Voice Memos container"
         case .legacyApplicationSupport: return "pre-sandbox Application Support"
         }
