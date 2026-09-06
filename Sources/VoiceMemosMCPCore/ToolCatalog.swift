@@ -154,19 +154,18 @@ public enum ToolCatalog {
             name: transcribeName,
             title: "Transcribe recordings",
             description: """
-                Transcribes recordings to text with Apple's Speech framework, forced to \
-                on-device recognition: the audio never leaves this Mac and no network \
-                request is made. Needs the Speech Recognition permission, which the other \
-                tools do not.
+                Transcribes recordings to text with Apple's Speech framework \
+                (SpeechAnalyzer/SpeechTranscriber): recognition is on-device only, with no \
+                server-backed path at all, so the audio never leaves this Mac. Needs the \
+                Speech Recognition permission, which the other tools do not.
 
-                SLOW — roughly the length of the audio itself, and nothing is reported \
-                until the whole batch is done. At most \
+                Recognition itself runs well faster than the length of the audio, including \
+                for a long recording — no splitting is needed on this end. A locale's \
+                on-device model downloads automatically the first time that locale is used, \
+                which can take a while over the network; after that, it is fast. Nothing is \
+                reported until the whole batch is done. At most \
                 \(configuration.maximumTranscribeCount) recordings per call. Ask for the \
                 ones that are actually needed rather than a whole listing.
-
-                A recording longer than about a minute is split into several on-device \
-                recognition passes and stitched back together: a single long pass \
-                otherwise tends to silently drop everything past roughly a minute.
 
                 The text is what the recogniser heard, punctuation included and nothing \
                 else: no summary, no speaker labels, no cleanup.
@@ -178,8 +177,8 @@ public enum ToolCatalog {
                     "locale": string(
                         """
                         Optional recognition locale such as "en-US" or "es-ES". Omit to use \
-                        the one this server is configured with. A locale whose on-device \
-                        model is not installed is refused rather than sent to Apple.
+                        the one this server is configured with. Its on-device model \
+                        downloads automatically if not already installed.
                         """),
                 ],
                 required: ["ids"]),

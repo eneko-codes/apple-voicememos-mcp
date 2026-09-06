@@ -16,8 +16,9 @@ Not affiliated with or endorsed by Apple Inc.
 
 ## Requirements
 
-- macOS 15 or later
-- Swift 6.0 or later (Xcode 26 ships it)
+- macOS 26 (Tahoe) or later — required by `SpeechAnalyzer`/`SpeechTranscriber`, the
+  on-device speech framework this server transcribes with
+- Swift 6.2 or later (Xcode 26 ships it)
 - A code signing identity. Ad-hoc works, but every rebuild then asks for permission
   again — see [Signing](#signing-and-why-it-is-not-optional).
 
@@ -28,7 +29,7 @@ Not affiliated with or endorsed by Apple Inc.
 | `recordings_status` | read | Reports which recording library this server can reach, whether Speech Recognition is granted, whether the on-device model for the recognition locale is installed, and where exports and cached transcripts go. Reads no audio. |
 | `recordings_list` | read | Recordings with id, name, date, duration and folder, newest first. Says how many matches were withheld. |
 | `recording_get` | read | Full record for one or more ids: name, file name, full path, folder, dates, duration, size and file type. No audio, no transcript. |
-| `recording_transcribe` | read | Transcribes recordings to text with `Speech`, forced to on-device recognition. Slow — see below. |
+| `recording_transcribe` | read | Transcribes recordings to text with `Speech`'s on-device `SpeechAnalyzer`/`SpeechTranscriber` — see below. |
 | `recording_export` | write | Copies a recording's audio into the configured export folder. The original is never moved, renamed or touched. |
 
 ## The rules worth knowing before you use it
@@ -37,17 +38,18 @@ Not affiliated with or endorsed by Apple Inc.
 purpose — this server reads and transcribes a library, it does not manage one. A test
 walks the whole catalogue to keep it that way.
 
-**Transcription is forced on-device and that is not configurable.** `recording_transcribe`
-sets `requiresOnDeviceRecognition` on every request; the audio never leaves the Mac and
-no network request is made. That is the whole reason transcribing someone's private
-recordings is acceptable at all, so it is not exposed as a flag to turn off.
+**Transcription is on-device and that is not configurable.** `recording_transcribe` uses
+`SpeechAnalyzer`/`SpeechTranscriber`, which has no server-backed recognition path at all —
+unlike the older `SFSpeechRecognizer` API, there is no flag to turn on-device recognition
+off, because there is nowhere else for it to go. The audio never leaves the Mac.
 
-**Transcription is slow.** On-device recognition runs at roughly the length of the
-audio itself, and nothing is reported until the whole batch finishes. A call is capped
-at `maximumTranscribeCount` recordings (5 by default, configurable 1–25) for exactly
-that reason — ask for the recordings actually needed rather than sweeping a listing.
-A second call for the same recording is immediate: transcripts are cached under
-`$TMPDIR`, keyed by a hash of the recording's id.
+**Transcription is fast once a locale's model is installed, but that model downloads
+the first time it is used.** Recognition itself runs well faster than the length of the
+audio, including for long recordings — nothing here needs to split one into pieces. A
+call is still capped at `maximumTranscribeCount` recordings (5 by default, configurable
+1–25): a first-time model download takes real time, and an unbounded batch would still
+return an unreadable wall of text. A second call for the same recording is immediate:
+transcripts are cached under `$TMPDIR`, keyed by a hash of the recording's id.
 
 **There is no search over spoken words.** Finding a phrase means transcribing the
 candidate recordings and reading them; the server will not silently transcribe a whole

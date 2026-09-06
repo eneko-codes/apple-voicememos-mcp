@@ -21,8 +21,9 @@ public struct Configuration: Sendable, Equatable {
 
     public var listLimit: Int = 50
 
-    /// Ceiling on one `recording_transcribe` call. On-device recognition runs at roughly
-    /// real time, so an unbounded batch holds a tool call open for a very long while.
+    /// Ceiling on one `recording_transcribe` call. Recognition itself is fast, but a first
+    /// use of a locale downloads its on-device model, and an unbounded batch would let one
+    /// call return an unreadable wall of transcript text besides.
     public var maximumTranscribeCount: Int = 5
 
     public init() {}

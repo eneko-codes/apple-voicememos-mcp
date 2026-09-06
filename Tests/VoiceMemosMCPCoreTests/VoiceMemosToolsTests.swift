@@ -305,17 +305,19 @@ struct VoiceMemosToolsTests {
         #expect(result.text.contains("the maximum is 1"))
     }
 
-    @Test("A missing on-device model is refused before any audio is opened")
-    func transcribeRefusesWithoutOnDeviceModel() async {
+    @Test("A locale with a recogniser but no model installed yet still transcribes")
+    func transcribeProceedsWithUninstalledModel() async {
+        // The real store downloads a missing model on demand rather than refusing outright
+        // — see `TranscriptionEngine.ensureInstalled`. `supportsOnDevice: false` here must
+        // not block the call before it reaches the store.
         let store = FakeRecordingStore(
             onDevice: OnDeviceSupport(
                 localeIdentifier: "es-ES", recognizerExists: true, supportsOnDevice: false))
         let result = await call(
             "recording_transcribe", ["ids": .array([.string("20260807 181500.m4a")])],
             store: store)
-        #expect(result.isError)
-        #expect(result.text.contains("never sends audio to Apple's servers"))
-        #expect(store.transcribed.isEmpty)
+        #expect(!result.isError)
+        #expect(store.transcribed == ["20260807 181500.m4a"])
     }
 
     @Test("A locale with no recogniser at all is named as such")

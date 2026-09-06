@@ -65,7 +65,7 @@ public struct VoiceMemosTools: Sendable {
         case ToolCatalog.statusName:
             return format.status(
                 store.speechAuthorization(),
-                onDevice: store.onDeviceSupport(locale: configuration.localeIdentifier),
+                onDevice: await store.onDeviceSupport(locale: configuration.localeIdentifier),
                 libraries: store.libraries(),
                 binaryPath: Self.binaryPath,
                 configuration: configuration,
@@ -120,11 +120,11 @@ public struct VoiceMemosTools: Sendable {
         }
 
         let locale = arguments.optionalString("locale") ?? configuration.localeIdentifier
-        let support = store.onDeviceSupport(locale: locale)
-        // Checked before the permission, and before any audio is opened: a missing
-        // on-device model is the failure the owner is most likely to hit, and it costs
-        // nothing to say so up front rather than after a minute of work.
-        guard support.supportsOnDevice else { throw ToolError.onDeviceUnavailable(support) }
+        let support = await store.onDeviceSupport(locale: locale)
+        // A model that is not installed yet is not a dead end any more: the store
+        // downloads it on demand before recognising. Only a locale this Mac has no
+        // recogniser for at all is refused up front, before any audio is opened.
+        guard support.recognizerExists else { throw ToolError.onDeviceUnavailable(support) }
 
         try await requireSpeechAccess()
 
