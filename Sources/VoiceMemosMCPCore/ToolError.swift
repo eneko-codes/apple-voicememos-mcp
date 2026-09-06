@@ -93,9 +93,10 @@ public enum ToolError: Error, Equatable {
             return """
                 Transcription of '\(id)' failed: \(detail)
 
-                Speech recognition gives up on silence, on audio it cannot decode, and on
-                a locale whose on-device model is missing. recordings_status reports which
-                of those applies.
+                Speech recognition gives up on silence and on audio it cannot decode. A
+                missing on-device model would not surface here at all: this server
+                downloads one itself before recognition ever starts, so by this point the
+                model was never the problem.
                 """
 
         case .storeFailure(let detail):
@@ -115,8 +116,9 @@ public enum ToolError: Error, Equatable {
                 Restart Claude Desktop and call this tool again; the consent dialog should
                 appear.
 
-                If it does not, check that the binary still carries its embedded Info.plist:
-                  otool -P .build/release/apple-voicememos-mcp | grep NSSpeechRecognition
+                If it does not, check that the binary named under "Binary" in
+                recordings_status still carries its embedded Info.plist:
+                  otool -P <that path> | grep NSSpeechRecognition
                 """
 
         case .denied:

@@ -59,18 +59,14 @@ public struct SystemRecordingStore: RecordingStore {
 
     public func onDeviceSupport(locale: String?) async -> OnDeviceSupport {
         let resolved = Self.locale(locale)
-        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: resolved)
-        else {
+        guard let (_, installed) = await TranscriptionEngine.resolve(resolved) else {
             return OnDeviceSupport(
                 localeIdentifier: resolved.identifier, recognizerExists: false,
                 supportsOnDevice: false)
         }
-        let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
-        let status = await AssetInventory.status(forModules: [transcriber])
         return OnDeviceSupport(
-            localeIdentifier: resolved.identifier,
-            recognizerExists: true,
-            supportsOnDevice: status == .installed)
+            localeIdentifier: resolved.identifier, recognizerExists: true,
+            supportsOnDevice: installed)
     }
 
     static func locale(_ identifier: String?) -> Locale {
@@ -326,16 +322,28 @@ public struct SystemRecordingStore: RecordingStore {
 /// documented guarantee, and this model runs well faster than real time on its own, so
 /// queuing a batch costs little a parallel run would have saved.
 private actor TranscriptionEngine {
-    func transcribe(url: URL, locale: Locale, recordingID: String) async throws -> String {
+    /// Resolves a locale to its transcriber and current install state in one place, so
+    /// `SystemRecordingStore.onDeviceSupport` (a pure status read) and `transcribe` below
+    /// (which acts on that state) cannot drift into checking this two different ways.
+    static func resolve(_ locale: Locale) async -> (transcriber: SpeechTranscriber, installed: Bool)?
+    {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale)
-        else {
+        else { return nil }
+        let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
+        let installed = await AssetInventory.status(forModules: [transcriber]) == .installed
+        return (transcriber, installed)
+    }
+
+    func transcribe(url: URL, locale: Locale, recordingID: String) async throws -> String {
+        guard let (transcriber, installed) = await Self.resolve(locale) else {
             throw ToolError.onDeviceUnavailable(
                 OnDeviceSupport(
                     localeIdentifier: locale.identifier, recognizerExists: false,
                     supportsOnDevice: false))
         }
-        let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
-        try await Self.ensureInstalled(transcriber, locale: locale)
+        if !installed {
+            try await Self.install(transcriber, locale: locale)
+        }
 
         let audioFile: AVAudioFile
         do {
@@ -357,6 +365,10 @@ private actor TranscriptionEngine {
                 let text = String(result.text.characters)
                 if !text.isEmpty { pieces.append(text) }
             }
+            // `analyzer` drives `transcriber.results` for as long as it stays alive; it has
+            // no other reference holding it up, and nothing above reads it again, so without
+            // this the optimizer is free to release it before the loop above is done pulling
+            // from that sequence.
             withExtendedLifetime(analyzer) {}
             return pieces.joined(separator: " ")
         } catch {
@@ -364,15 +376,15 @@ private actor TranscriptionEngine {
         }
     }
 
-    /// Downloads this locale's model the first time it is needed.
+    /// Downloads this locale's model. Only called once `resolve` has already reported it
+    /// missing, so this does not re-check `AssetInventory.status` itself.
     ///
     /// Verified by hand: the classic Dictation language list (System Settings → Keyboard →
     /// Dictation) does not install this — this framework's model is a separate asset, and
     /// `es-ES` came back not installed here even with Dictation already showing it enabled.
     /// `AssetInventory` is the actual, current way to get it, and it is exactly what an app
     /// is meant to call rather than sending the owner to a settings pane that would not help.
-    private static func ensureInstalled(_ transcriber: SpeechTranscriber, locale: Locale) async throws {
-        guard await AssetInventory.status(forModules: [transcriber]) != .installed else { return }
+    private static func install(_ transcriber: SpeechTranscriber, locale: Locale) async throws {
         guard
             let request = try await AssetInventory.assetInstallationRequest(
                 supporting: [transcriber])
