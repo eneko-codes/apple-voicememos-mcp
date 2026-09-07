@@ -16,6 +16,16 @@ Do not modify, delete or move an existing recording — these are critical data.
 
 A local MCP server (Swift 6, stdio transport) for Voice Memos. Recordings are reached as files on disk (no framework or scripting dictionary exists); transcription uses the on-device `Speech` framework. No network, no cloud API.
 
+## Apple frameworks
+
+[Speech](https://developer.apple.com/documentation/speech) for transcription — `SpeechAnalyzer`, `SpeechTranscriber` and `AssetInventory`, the macOS 26 Swift-only API, with `SFSpeechRecognizer` used only for authorisation. [AVFoundation](https://developer.apple.com/documentation/avfoundation) — `AVURLAsset`, `AVMetadataItem`, `AVAudioFile` — for title, duration and audio. [FileManager](https://developer.apple.com/documentation/foundation/filemanager) walks the library and makes `recording_export`'s copy, the only write. [CryptoKit](https://developer.apple.com/documentation/cryptokit) `SHA256` keys the transcript cache. Consent key: [`NSSpeechRecognitionUsageDescription`](https://developer.apple.com/documentation/bundleresources/information-property-list/nsspeechrecognitionusagedescription).
+
+## Native surface not used
+
+- The Objective-C recognition pipeline: `SFSpeechURLRecognitionRequest`, `SFSpeechRecognitionTask`, `SFSpeechRecognitionResult`, `SFTranscription`, `SFTranscriptionSegment` — so no per-word timings or confidences — plus `SFSpeechLanguageModel` and `SFVoiceAnalytics`.
+- All of AVFoundation except asset metadata and file reading: no capture, playback, editing, export, or audio engine.
+- Voice Memos itself is not scriptable (`sdef` answers with error -192) and its App Intents hand back no audio, which is why the library is read as files rather than through the app.
+
 ## Commands
 
 ```bash

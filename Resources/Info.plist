@@ -14,10 +14,10 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 
-	<!-- recording_transcribe runs SFSpeechRecognizer with requiresOnDeviceRecognition,
-	     so no audio leaves the machine — but the permission is still the same one, and
-	     without this key macOS denies it with no prompt. Key name verified against the
-	     tccd binary on macOS 26.5. -->
+	<!-- recording_transcribe runs SpeechAnalyzer/SpeechTranscriber, which has no
+	     server-backed path at all, so no audio leaves the machine — but the permission is
+	     the same one SFSpeechRecognizer gates, and without this key macOS denies it with no
+	     prompt. Key name verified against the tccd binary on macOS 26.5. -->
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lets Claude transcribe your voice recordings on this Mac. Recognition is forced on-device, so the audio is never sent to Apple.</string>
 
