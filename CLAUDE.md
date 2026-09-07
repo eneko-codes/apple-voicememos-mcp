@@ -44,6 +44,10 @@ named in the question you asked, it has to have a way back, and you have to say 
 you are on and why the gentler ones cannot answer it. Whatever you created, remove in the
 same session.
 
+**What you make goes in `$TMPDIR`.** Synthetic audio to transcribe belongs under a
+temporary directory you created yourself — never in the owner's library — and is deleted in
+the same session.
+
 ## What this is
 
 A local MCP server (Swift 6, stdio transport) for Voice Memos. Recordings are reached as files on disk (no framework or scripting dictionary exists); transcription uses the on-device `Speech` framework. No network, no cloud API.
