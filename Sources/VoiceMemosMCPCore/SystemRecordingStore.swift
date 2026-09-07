@@ -12,7 +12,7 @@ import Speech
 /// it either plays, selects, combines, imports or deletes. Not one of them hands back the
 /// audio. Transcription and export both need the bytes, so a Shortcuts route could only
 /// have produced a listing nothing else could act on. The library is therefore read as
-/// files, and `verification.md` records the whole check.
+/// files.
 public struct SystemRecordingStore: RecordingStore {
 
     /// Audio this server will consider. Voice Memos writes `.m4a`; the rest are here

@@ -221,8 +221,7 @@ the same session and deleted afterward, per `CLAUDE.md`. Its hard rule, which ou
 everything else there: an agent must never modify, delete or move a recording the owner
 made.
 
-Manual verification against a live library is the owner's job; `verification.md` is
-the script for it.
+Manual verification against a live library is the owner's job.
 
 ## Licence
 
