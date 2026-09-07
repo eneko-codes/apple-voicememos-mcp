@@ -14,17 +14,17 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 
-	<!-- recording_transcribe runs SFSpeechRecognizer with requiresOnDeviceRecognition,
-	     so no audio leaves the machine — but the permission is still the same one, and
-	     without this key macOS denies it with no prompt. Key name verified against the
-	     tccd binary on macOS 26.5. -->
+	<!-- recording_transcribe runs SpeechAnalyzer/SpeechTranscriber, which has no
+	     server-backed path at all, so no audio leaves the machine — but the permission is
+	     the same one SFSpeechRecognizer gates, and without this key macOS denies it with no
+	     prompt. Key name verified against the tccd binary on macOS 26.5. -->
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lets Claude transcribe your voice recordings on this Mac. Recognition is forced on-device, so the audio is never sent to Apple.</string>
 
 	<!-- Declared, not currently exercised. Voice Memos is reachable only through the
-	     Shortcuts app, which is driven by Apple events, and the App Intents check
-	     recorded in verification.md may yet be worth revisiting for the one thing
-	     the filesystem cannot supply: the in-app folder a recording belongs to. TCC
+	     Shortcuts app, which is driven by Apple events, and the App Intents route
+	     may yet be worth revisiting for the one thing the filesystem cannot supply:
+	     the in-app folder a recording belongs to. TCC
 	     denies an undeclared Apple event with no prompt at all, so declaring it now
 	     costs a string and saves a silent failure later. -->
 	<key>NSAppleEventsUsageDescription</key>

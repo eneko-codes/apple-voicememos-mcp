@@ -32,6 +32,24 @@ Not affiliated with or endorsed by Apple Inc.
 | `recording_transcribe` | read | Transcribes recordings to text with `Speech`'s on-device `SpeechAnalyzer`/`SpeechTranscriber` — see below. |
 | `recording_export` | write | Copies a recording's audio into the configured export folder. The original is never moved, renamed or touched. |
 
+## Frameworks and APIs
+
+Voice Memos ships no framework and is not scriptable, so recordings are read as files.
+
+| Used | For | Reference |
+|---|---|---|
+| Speech — `SpeechAnalyzer`, `SpeechTranscriber`, `AssetInventory` (macOS 26, Swift-only); `SFSpeechRecognizer` for authorisation only | Transcription, forced on-device | [Speech](https://developer.apple.com/documentation/speech) |
+| AVFoundation — `AVURLAsset`, `AVMetadataItem`, `AVAudioFile` | Title, duration, and reading the audio | [AVFoundation](https://developer.apple.com/documentation/avfoundation) |
+| Foundation `FileManager` + `URLResourceKey` | Walking the library, and `recording_export`'s copy — the only write | [FileManager](https://developer.apple.com/documentation/foundation/filemanager) |
+| CryptoKit — `SHA256` | Keying the transcript cache | [CryptoKit](https://developer.apple.com/documentation/cryptokit) |
+| `NSSpeechRecognitionUsageDescription` | The consent string macOS shows | [Information Property List](https://developer.apple.com/documentation/bundleresources/information-property-list/nsspeechrecognitionusagedescription) |
+
+The older Objective-C recognition pipeline is unused — `SFSpeechURLRecognitionRequest`,
+`SFSpeechRecognitionTask`, `SFTranscription` and `SFTranscriptionSegment`, so there are no
+per-word timings or confidences — as are custom language models and voice analytics. Of
+AVFoundation, only asset metadata and file reading are touched: nothing captures, plays,
+edits or exports audio.
+
 ## The rules worth knowing before you use it
 
 **Nothing here can rename, move or delete a recording.** There is no such tool, on
@@ -86,8 +104,8 @@ That builds a universal (arm64 + x86_64) release binary, signs it, checks the em
 `Info.plist` survived both linking and signing, prints the designated requirement, and
 writes `dist/apple-voicememos-mcp.mcpb`. It fails loudly rather than shipping a bundle
 that would silently refuse to work — including checking that `NAME=` at the top of the
-script actually says `apple-voicememos-mcp`, since this script was copied from the
-calendar server and once packed the wrong binary while reporting success.
+script actually says `apple-voicememos-mcp`, since a wrong `NAME=` once packed the
+wrong binary while reporting success.
 
 ```bash
 security find-identity -v -p codesigning
@@ -101,8 +119,8 @@ running, and the old one keeps answering.
 
 ### 3. Reach the recordings
 
-Unlike the EventKit-backed servers (Calendar, Reminders), there is no framework
-permission that unlocks Voice Memos directly. `recordings_status` reports which of two
+There is no framework permission that unlocks Voice Memos: it ships no framework and is not
+scriptable. `recordings_status` reports which of two
 situations the server is in, rather than returning an empty list — an empty library and
 an unreadable one must never look the same:
 
@@ -160,8 +178,8 @@ MCPB_HARDENED=1 MCPB_SIGN_IDENTITY="Developer ID Application: …" ./scripts/pac
 
 That adds the hardened runtime and a secure timestamp, which notarisation requires.
 `NSAppleEventsUsageDescription` is embedded and, if `Resources/entitlements.plist`
-exists, applied — declared for a possible future Shortcuts route to the in-app folder a
-recording belongs to, though nothing in this server sends an Apple event today.
+exists, applied — declared against a future need, though nothing in this server sends an
+Apple event today.
 
 ## Tool switches
 
@@ -203,9 +221,9 @@ answered.
   [the rules above](#the-rules-worth-knowing-before-you-use-it).
 - **Nothing manages the library.** No rename, delete, move or re-record tool exists,
   and none is planned; `recording_export` writes a copy, it never touches the original.
-- **`NSAppleEventsUsageDescription` is declared but unused.** It is there for a possible
-  future Shortcuts route to the in-app folder a recording belongs to (the filesystem
-  cannot see it), but no tool sends an Apple event today.
+- **`NSAppleEventsUsageDescription` is declared but unused.** No tool sends an Apple event.
+  The in-app folder a recording belongs to is not visible from the filesystem, and nothing
+  here supplies it.
 
 ## Development
 
@@ -214,15 +232,14 @@ swift build
 swift test
 ```
 
-46 tests, all against an in-memory fake (`FakeRecordingStore`) with invented recording
-names, durations and transcripts. They need no permissions and never touch a real
-recording — they exercise the `Speech` path only against synthetic audio generated in
-the same session and deleted afterward, per `CLAUDE.md`. Its hard rule, which outranks
+44 tests across two suites, against an in-memory fake (`FakeRecordingStore`) with invented
+recording names, durations and transcripts, plus three directory-probe cases. They need no
+permissions and never touch a real recording; no test reaches `Speech` or `AVFoundation` at
+all, per `CLAUDE.md`. Its hard rule, which outranks
 everything else there: an agent must never modify, delete or move a recording the owner
 made.
 
-Manual verification against a live library is the owner's job; `verification.md` is
-the script for it.
+Manual verification against a live library is the owner's job.
 
 ## Licence
 
