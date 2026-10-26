@@ -232,8 +232,8 @@ swift build
 swift test
 ```
 
-44 tests across two suites, against an in-memory fake (`FakeRecordingStore`) with invented
-recording names, durations and transcripts, plus three directory-probe cases. They need no
+The tests run against an in-memory fake (`FakeRecordingStore`) with invented
+recording names, durations and transcripts, plus a few directory-probe cases. They need no
 permissions and never touch a real recording; no test reaches `Speech` or `AVFoundation` at
 all, per `CLAUDE.md`. Its hard rule, which outranks
 everything else there: an agent must never modify, delete or move a recording the owner
