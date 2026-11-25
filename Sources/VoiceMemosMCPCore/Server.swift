@@ -1,10 +1,9 @@
 import Foundation
-import MCP
 
 public enum VoiceMemosMCPServer {
 
     public static let name = "apple-voicememos-mcp"
-    public static let version = "1.1.1"
+    public static let version = "1.1.2"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: the id workflow, what transcription costs, and where policy actually lives.
@@ -48,25 +47,19 @@ public enum VoiceMemosMCPServer {
     public static func run(
         store: (any RecordingStore)? = nil,
         configuration: Configuration = Configuration()
-    ) async throws {
+    ) async {
         let tools = VoiceMemosTools(
             store: store ?? SystemRecordingStore(configuration: configuration),
             configuration: configuration)
-        let server = Server(
-            name: name,
-            version: version,
-            instructions: instructions,
-            capabilities: .init(tools: .init(listChanged: false))
-        )
-
-        await server.withMethodHandler(ListTools.self) { _ in .init(tools: ToolCatalog.all(configuration)) }
-        await server.withMethodHandler(CallTool.self) { await tools.handle($0) }
-
-        // The default StdioTransport logger is a no-op handler. Leave it that way: a
-        // logger writing to stdout would interleave with the JSON-RPC stream and break
-        // every response after the first log line.
         Diagnostics.started(version: version)
-        try await server.start(transport: StdioTransport())
-        await server.waitUntilCompleted()
+        await serveStandardStreams(handler: handler(tools: tools, configuration: configuration))
+    }
+
+    public static func handler(
+        tools: VoiceMemosTools, configuration: Configuration = Configuration()
+    ) -> MCPHandler {
+        MCPHandler(
+            name: name, version: version, instructions: instructions,
+            catalog: ToolCatalog.all(configuration), tools: tools)
     }
 }

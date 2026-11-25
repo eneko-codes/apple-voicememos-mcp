@@ -1,5 +1,4 @@
 import Foundation
-import MCP
 
 /// Routes a `tools/call` to the store and renders the answer.
 ///
@@ -8,7 +7,7 @@ import MCP
 /// against an in-memory double with no recordings and no consent dialog. The one
 /// exception is the export path check, which is policy rather than access: it decides
 /// where a copy may land, and it has to be testable.
-public struct VoiceMemosTools: Sendable {
+public struct VoiceMemosTools: ToolHandler {
     private let store: any RecordingStore
     private let calendar: Calendar
     private let configuration: Configuration
@@ -41,27 +40,21 @@ public struct VoiceMemosTools: Sendable {
         self.now = now
     }
 
-    public func handle(_ parameters: CallTool.Parameters) async -> CallTool.Result {
+    public func handle(_ parameters: ToolCall) async -> ToolOutput {
         let started = ContinuousClock.now
         do {
-            let text = try await run(parameters)
-            return .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: false)
+            return ToolOutput(text: try await run(parameters), isError: false)
         } catch let error as ToolError {
             Diagnostics.toolFailed(parameters.name, error: error, since: started)
-            return .init(
-                content: [.text(text: error.message, annotations: nil, _meta: nil)], isError: true)
+            return ToolOutput(text: error.message, isError: true)
         } catch {
             Diagnostics.toolFailed(parameters.name, error: error, since: started)
-            return .init(
-                content: [
-                    .text(
-                        text: ToolError.storeFailure(error.localizedDescription).message,
-                        annotations: nil, _meta: nil)
-                ], isError: true)
+            return ToolOutput(
+                text: ToolError.storeFailure(error.localizedDescription).message, isError: true)
         }
     }
 
-    private func run(_ parameters: CallTool.Parameters) async throws -> String {
+    private func run(_ parameters: ToolCall) async throws -> String {
         let arguments = Arguments(parameters.arguments, calendar: calendar)
 
         switch parameters.name {
