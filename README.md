@@ -27,10 +27,10 @@ Not affiliated with or endorsed by Apple Inc.
 | Tool | Kind | What it does |
 |---|---|---|
 | `recordings_status` | read | Reports which recording library this server can reach, whether Speech Recognition is granted, whether the on-device model for the recognition locale is installed, and where exports and cached transcripts go. Reads no audio. |
-| `recordings_list` | read | Recordings with id, name, date, duration and folder, newest first. Says how many matches were withheld. |
-| `recording_get` | read | Full record for one or more ids: name, file name, full path, folder, dates, duration, size and file type. No audio, no transcript. |
-| `recording_transcribe` | read | Transcribes recordings to text with `Speech`'s on-device `SpeechAnalyzer`/`SpeechTranscriber` — see below. |
-| `recording_export` | write | Copies a recording's audio into the configured export folder. The original is never moved, renamed or touched. |
+| `recordings_list` | read | Recordings newest first (ties by id), one page at a time: id, name, date, duration, folder. `from_date` and `to_date` bound the range, `name_contains` and `folder` filter, `limit` and `offset` select the page. |
+| `recording_get` | read | Full record for several `ids` at once (at most 10): name, file name, full path, folder, dates, duration, size and file type. No audio, no transcript. |
+| `recording_transcribe` | read | Transcribes recordings to text with `Speech`'s on-device `SpeechAnalyzer`/`SpeechTranscriber`, in the recognition `locale` given or the configured one. Each transcript is returned through a window; `character_offset` and `max_characters` read the rest. See below. |
+| `recording_export` | write | Copies the recording with the given `id` into the configured export folder, at `destination` inside it. The original is never moved, renamed or touched. |
 
 ## Frameworks and APIs
 
@@ -64,10 +64,30 @@ off, because there is nowhere else for it to go. The audio never leaves the Mac.
 **Transcription is fast once a locale's model is installed, but that model downloads
 the first time it is used.** Recognition itself runs well faster than the length of the
 audio, including for long recordings — nothing here needs to split one into pieces. A
-call is still capped at `maximumTranscribeCount` recordings (5 by default, configurable
-1–25): a first-time model download takes real time, and an unbounded batch would still
-return an unreadable wall of text. A second call for the same recording is immediate:
-transcripts are cached under `$TMPDIR`, keyed by a hash of the recording's id.
+call is capped at `maximumTranscribeCount` recordings (5 by default, configurable
+1–25): a first-time model download takes real time. A second call for the same recording
+is immediate: transcripts are cached under `$TMPDIR`, keyed by a hash of the recording's
+id.
+
+**Nothing returns more than it can carry, and every result says what it left out.** The
+first lines of a result say how much exists, what it holds and the exact argument that
+returns the rest: `offset` for the next page of a listing, `character_offset` (with only
+that id) for the rest of a transcript. Each transcript gets a window of about 10,000
+characters shared among the ids asked for, whatever the setting for how many recordings
+a call may take; `max_characters` sets it. A listing clips a name to 80 characters and
+says so; `recording_get` reads it whole. A number outside its range is moved into it and
+the result says which value was used, and an argument a tool does not list is refused.
+The renames in 2.0.0: `created_after` is now `from_date` and `created_before` is now
+`to_date`, and `to_date` is inclusive at the precision written (a plain day covers the
+whole of it).
+
+**Time limits.** A call that has not finished after 45 seconds is abandoned. A listing
+that cannot walk the library within 20 seconds, or reaches 10,000 matches, returns what
+it found and says the scan stopped; narrow it with `from_date`, `to_date`, `folder` or
+`name_contains`. `recording_transcribe` has 180 seconds, and when its work reaches nine
+tenths of that it returns the transcripts finished so far, names the recordings it did
+not reach and says the result is partial; ask for those again, since finished ones are
+cached. An export that times out says the copy may still have been made.
 
 **There is no search over spoken words.** Finding a phrase means transcribing the
 candidate recordings and reading them; the server will not silently transcribe a whole
@@ -88,9 +108,9 @@ in-app folders in its own database, not on disk, which this server never reads. 
 here means the sub-folder path under whichever library root it is reading from, and
 reads as `(root)` for a library with none.
 
-**A plain day given as `created_before` covers that whole day.** Read literally it
-would exclude the day named, which would make a one-day window always empty; a test
-pins the inclusive behaviour.
+**A plain day given as `to_date` covers that whole day.** Read literally it would
+exclude the day named, which would make a one-day window always empty; a test pins the
+inclusive behaviour. A date that does not exist, such as 30 February, is refused.
 
 ## Install
 
@@ -217,7 +237,7 @@ answered.
 
 - **No search over spoken words.** A phrase inside a recording can only be found by
   transcribing candidates and reading the text back.
-- **Transcription is capped per call**, by design — see
+- **Transcription is capped per call** and has a time limit, by design — see
   [the rules above](#the-rules-worth-knowing-before-you-use-it).
 - **Nothing manages the library.** No rename, delete, move or re-record tool exists,
   and none is planned; `recording_export` writes a copy, it never touches the original.

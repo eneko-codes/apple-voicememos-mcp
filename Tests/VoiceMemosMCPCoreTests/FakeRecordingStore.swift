@@ -14,6 +14,10 @@ final class FakeRecordingStore: RecordingStore, @unchecked Sendable {
     /// Ids the fake refuses to transcribe, so the partial-failure path is reachable.
     var unreadable: Set<String> = []
     var transcriptText: String = "This is the invented transcript."
+    /// Ids whose transcription never finishes on its own, so the deadline is reachable.
+    var stalled: Set<String> = []
+    /// What the fake reports as where its walk stopped, so the notice is reachable.
+    var scanStoppedAfter: Int?
 
     private(set) var transcribed: [String] = []
     private(set) var copied: [(id: String, destination: URL)] = []
@@ -63,11 +67,12 @@ final class FakeRecordingStore: RecordingStore, @unchecked Sendable {
         }
         if let after = query.createdAfter { matches = matches.filter { $0.created >= after } }
         if let before = query.createdBefore { matches = matches.filter { $0.created < before } }
-        matches.sort { $0.created > $1.created }
+        matches.sort { $0.created == $1.created ? $0.id < $1.id : $0.created > $1.created }
 
         let page = matches.dropFirst(query.offset).prefix(query.limit).map(\.summary)
         return RecordingPage(
-            results: Array(page), total: matches.count, libraryPath: root.path)
+            results: Array(page), total: matches.count, libraryPath: root.path,
+            scanStoppedAfter: scanStoppedAfter)
     }
 
     func fetch(ids: [String]) async throws -> [RecordingDetail] {
@@ -82,6 +87,7 @@ final class FakeRecordingStore: RecordingStore, @unchecked Sendable {
             throw ToolError.transcriptionFailed(
                 id: recording.id, detail: "the fake was told this file is unreadable")
         }
+        if stalled.contains(recording.id) { try await Task.sleep(for: .seconds(600)) }
         transcribed.append(recording.id)
         return Transcript(
             recordingID: recording.id, text: transcriptText,

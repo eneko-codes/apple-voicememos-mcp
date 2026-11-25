@@ -101,8 +101,9 @@ public struct Format: Sendable {
                 ("Recognition locale", onDeviceLine),
                 ("Export folder", configuration.exportRoot ?? "not configured (recording_export is refused)"),
                 ("Transcript cache", cacheLine),
-                ("Recordings per page", "\(configuration.listLimit) by default"),
+                ("Recordings per page", "\(configuration.listLimit) by default, at most \(Configuration.listLimitRange.upperBound)"),
                 ("Transcriptions per call", "at most \(configuration.maximumTranscribeCount)"),
+                ("Time limit per call", "\(Configuration.timeout.components.seconds) seconds, \(Configuration.transcribeTimeout.components.seconds) for transcription"),
                 ("Binary", binaryPath),
             ]))
 
@@ -115,34 +116,48 @@ public struct Format: Sendable {
             """
     }
 
-    public func listing(_ page: RecordingPage, offset: Int) -> String {
-        guard !page.results.isEmpty else {
-            return page.total == 0
-                ? "No recordings match. Library: \(page.libraryPath)"
-                : "No recordings on this page; \(page.total) match in total. Lower 'offset'."
-        }
+    /// `text` cut to `width` characters with an ellipsis, for a field a row holds only the
+    /// start of.
+    static func clip(_ text: String, to width: Int) -> String {
+        text.count > width ? String(text.prefix(width - 1)) + "…" : text
+    }
 
-        let idWidth = page.results.map(\.id.count).max() ?? 0
-        let nameWidth = page.results.map(\.name.count).max() ?? 0
-        let lines = page.results.map { recording in
-            "  \(Self.pad(recording.id, to: idWidth))  \(Self.pad(recording.name, to: nameWidth))  "
+    /// The header and one line per recording. What the page leaves out is announced by the
+    /// caller, before this text, with `Notice`.
+    public func listing(
+        _ shown: [RecordingSummary], total: Int, libraryPath: String, from: ParsedDate?,
+        to: ParsedDate?
+    ) -> String {
+        let range: String
+        switch (from, to) {
+        case (nil, nil): range = "whole library"
+        case (let start?, nil): range = "from \(echo(start)) onwards"
+        case (nil, let end?): range = "up to \(echo(end))"
+        case (let start?, let end?): range = "\(echo(start)) → \(echo(end))"
+        }
+        // The resolved range and zone are echoed so a model can catch its own off-by-one-day.
+        let header =
+            "Library: \(libraryPath)\n\(total) recording\(total == 1 ? "" : "s") · \(range) · "
+            + "\(calendar.timeZone.identifier) · newest first, then by id"
+
+        guard total > 0 else { return header + "\nNo recordings match." }
+        guard !shown.isEmpty else { return header + "\n(nothing at this offset)" }
+
+        let names = shown.map { Self.clip($0.name, to: Configuration.listNameWidth) }
+        let idWidth = shown.map(\.id.count).max() ?? 0
+        let nameWidth = names.map(\.count).max() ?? 0
+        let lines = zip(shown, names).map { recording, name in
+            "  \(Self.pad(recording.id, to: idWidth))  \(Self.pad(name, to: nameWidth))  "
                 + "\(timestamp(recording.created))  \(Self.duration(recording.duration))  "
                 + Self.folder(recording.folder)
         }
+        return header + "\nid · name · recorded · duration · folder\n\n" + lines.joined(separator: "\n")
+    }
 
-        let shown = offset + page.results.count
-        let footer =
-            shown < page.total
-            ? "\nShowing \(offset + 1)–\(shown) of \(page.total). Page with 'offset'."
-            : "\n\(page.total) recording(s)."
-
-        return """
-            Library: \(page.libraryPath)
-            id · name · recorded · duration · folder
-
-            \(lines.joined(separator: "\n"))
-            \(footer)
-            """
+    /// A filter bound printed back in the shape it arrived in, so the echoed range can be
+    /// pasted straight into the next call.
+    func echo(_ bound: ParsedDate) -> String {
+        DateParsing.roundTrip(bound.date, isDateOnly: bound.isDateOnly, calendar: calendar)
     }
 
     public func details(_ recordings: [RecordingDetail], missing: [String]) -> String {
@@ -162,34 +177,62 @@ public struct Format: Sendable {
         }.joined(separator: "\n\n")
 
         guard !missing.isEmpty else { return blocks }
-        let notFound = "Not found: \(missing.joined(separator: ", "))"
+        let notFound = "Not found:\n\(ToolError.listed(missing))"
         return recordings.isEmpty ? notFound : "\(blocks)\n\n\(notFound)"
     }
 
     /// One block per transcript, each headed by the recording it came from so a batch
-    /// cannot be misattributed.
+    /// cannot be misattributed, and each transcript cut to the window asked for. The
+    /// windows' notices come back separately because they go before all the data, not
+    /// beside each block.
+    ///
+    /// The transcript is printed flush left under its header rather than indented, because
+    /// indentation would silently change the content the caller asked for.
     public func transcripts(
         _ transcripts: [(recording: RecordingDetail, transcript: Transcript, wasCached: Bool)],
-        missing: [String],
-        failures: [(id: String, reason: String)]
-    ) -> String {
+        characterOffset: Int, maxCharacters: Int,
+        missing: [String], unreached: [String], failures: [(id: String, reason: String)]
+    ) -> (text: String, notices: [String]) {
+        var notices: [String] = []
         var sections = transcripts.map { entry -> String in
             let provenance = entry.wasCached ? "from cache" : "transcribed on-device"
-            return """
-                \(entry.recording.name) · \(entry.recording.id)
+            var section = """
+                \(Self.clip(entry.recording.name, to: Configuration.listNameWidth)) · \(entry.recording.id)
                 \(Self.duration(entry.recording.duration)) · \(entry.transcript.localeIdentifier) · \(provenance)
 
-                \(entry.transcript.text.isEmpty ? "(no speech recognised)" : entry.transcript.text)
                 """
+            guard !entry.transcript.text.isEmpty else {
+                return section + "(no speech recognised)"
+            }
+            let window = ToolStandard.window(
+                of: entry.transcript.text, characterOffset: characterOffset,
+                maxCharacters: maxCharacters,
+                label: transcripts.count > 1
+                    ? "id=\(entry.recording.id) (ask for it alone)" : "id=\(entry.recording.id)")
+            if let notice = window.notice { notices.append(notice) }
+            section += window.text
+            return section
         }
 
+        if transcripts.contains(where: { $0.recording.name.count > Configuration.listNameWidth }) {
+            notices.append(
+                Notice.clipped(
+                    field: "Name", width: Configuration.listNameWidth, tool: ToolCatalog.getName))
+        }
         if !missing.isEmpty {
-            sections.append("Not found: \(missing.joined(separator: ", "))")
+            sections.append("Not found:\n\(ToolError.listed(missing))")
         }
-        for failure in failures {
-            sections.append("Failed: \(failure.id) — \(failure.reason)")
+        if !unreached.isEmpty {
+            sections.append(
+                "Not transcribed before the time limit:\n"
+                    + ToolError.listed(unreached, shown: unreached.count, whole: true))
         }
-        return sections.joined(separator: "\n\n———\n\n")
+        for failure in failures.prefix(5) {
+            sections.append(
+                "Failed: \(ToolStandard.echo(failure.id)) — \(failure.reason.prefix(300))")
+        }
+        if failures.count > 5 { sections.append("and \(failures.count - 5) more failed") }
+        return (sections.joined(separator: "\n\n———\n\n"), notices)
     }
 
     public func exported(_ file: ExportedFile) -> String {
