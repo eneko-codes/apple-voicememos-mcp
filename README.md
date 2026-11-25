@@ -97,8 +97,12 @@ pins the inclusive behaviour.
 ### 1. Build the bundle
 
 ```bash
-MCPB_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./scripts/pack.sh
+security find-identity -v -p codesigning   # copy the 40-character hash of an Apple Development or Developer ID Application identity
+MCPB_SIGN_IDENTITY="<identity hash>" ./scripts/pack.sh
 ```
+
+Pass the hash, not the certificate's name: `pack.sh` prints the identity it signs with,
+and the name is yours.
 
 That builds an arm64 (Apple silicon only) release binary, signs it, checks the embedded
 `Info.plist` survived both linking and signing, prints the designated requirement, and
@@ -106,10 +110,6 @@ writes `dist/apple-voicememos-mcp.mcpb`. It fails loudly rather than shipping a 
 that would silently refuse to work — including checking that `NAME=` at the top of the
 script actually says `apple-voicememos-mcp`, since a wrong `NAME=` once packed the
 wrong binary while reporting success.
-
-```bash
-security find-identity -v -p codesigning
-```
 
 ### 2. Install it
 
@@ -173,7 +173,7 @@ one fresh consent round if the *identity* itself changes.
 ### Preparing something to distribute
 
 ```bash
-MCPB_HARDENED=1 MCPB_SIGN_IDENTITY="Developer ID Application: …" ./scripts/pack.sh
+MCPB_HARDENED=1 MCPB_SIGN_IDENTITY="<Developer ID Application hash>" ./scripts/pack.sh
 ```
 
 That adds the hardened runtime and a secure timestamp, which notarisation requires.
