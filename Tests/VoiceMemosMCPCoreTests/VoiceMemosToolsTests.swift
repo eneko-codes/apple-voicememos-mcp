@@ -16,11 +16,14 @@ struct VoiceMemosToolsTests {
         // cache cannot see each other's entries — the production server uses one fixed
         // path under $TMPDIR instead; see VoiceMemosTools.defaultCacheDirectory.
         cacheDirectory: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voicememos-cache-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("voicememos-cache-\(UUID().uuidString)", isDirectory: true),
+        timeout: Duration = Configuration.timeout,
+        transcribeTimeout: Duration = Configuration.transcribeTimeout
     ) async -> (text: String, isError: Bool) {
         let tools = VoiceMemosTools(
             store: store, calendar: Fixtures.calendar, configuration: configuration,
-            cacheDirectory: cacheDirectory, now: { Fixtures.now })
+            cacheDirectory: cacheDirectory, now: { Fixtures.now }, timeout: timeout,
+            transcribeTimeout: transcribeTimeout)
         let result = await tools.handle(.init(name: name, arguments: arguments))
         guard case .text(let text) = result.content.first else {
             return ("(no text content)", true)
@@ -93,7 +96,7 @@ struct VoiceMemosToolsTests {
 
         let tools = ToolCatalog.all(configuration)
         let transcribe = try #require(tools.first { $0.name == "recording_transcribe" })
-        #expect(transcribe.description?.contains("3 recordings per call") == true)
+        #expect(transcribe.description?.contains("one to 3 recordings") == true)
 
         let export = try #require(tools.first { $0.name == "recording_export" })
         #expect(export.description?.contains("/invented/Exports") == true)
@@ -148,7 +151,8 @@ struct VoiceMemosToolsTests {
         #expect(ideaLine != nil && quarterlyLine != nil)
         #expect(ideaLine!.lowerBound < quarterlyLine!.lowerBound)
         #expect(result.text.contains("1:02:05"))
-        #expect(result.text.contains("3 recording(s)"))
+        #expect(result.text.contains("3 recordings"))
+        #expect(!result.text.contains("Showing"))
         // A recording at the library root prints its folder as "(root)"; one filed under
         // a real folder prints that folder's name.
         #expect(result.text.contains("(root)"))
@@ -165,12 +169,12 @@ struct VoiceMemosToolsTests {
         #expect(byFolder.text.contains("Half-asleep idea"))
         #expect(!byFolder.text.contains("Shopping list"))
 
-        // Both bounds name the same day on purpose. A plain day as `created_before`
+        // Both bounds name the same day on purpose. A plain day as `to_date`
         // covers that whole day — see the next test — so naming the 8th here would
         // include the recording made at 22:00 on the 8th rather than excluding it.
         let byDate = await call(
             "recordings_list",
-            ["created_after": .string("2026-08-07"), "created_before": .string("2026-08-07")])
+            ["from_date": .string("2026-08-07"), "to_date": .string("2026-08-07")])
         #expect(byDate.text.contains("Shopping list"))
         #expect(!byDate.text.contains("Half-asleep idea"))
         #expect(!byDate.text.contains("Quarterly"))
@@ -178,11 +182,11 @@ struct VoiceMemosToolsTests {
 
     /// A plain day read literally would exclude the whole of that day, so a one-day
     /// window would always be empty.
-    @Test("created_before given as a plain day includes that whole day")
+    @Test("to_date given as a plain day includes that whole day")
     func rangeEndCoversTheDay() async {
         let result = await call(
             "recordings_list",
-            ["created_after": .string("2026-08-08"), "created_before": .string("2026-08-08")])
+            ["from_date": .string("2026-08-08"), "to_date": .string("2026-08-08")])
         #expect(result.text.contains("Half-asleep idea"))
     }
 
@@ -195,7 +199,7 @@ struct VoiceMemosToolsTests {
     @Test("A page past the end says so instead of looking empty")
     func listReportsEmptyPage() async {
         let result = await call("recordings_list", ["offset": .int(99)])
-        #expect(result.text.contains("3 match in total"))
+        #expect(result.text.contains("Showing 0 of 3 recordings: offset=99 is past the end."))
     }
 
     @Test("An unreachable library explains Full Disk Access and the alternative")
@@ -209,7 +213,7 @@ struct VoiceMemosToolsTests {
 
     @Test("A bad date names all three accepted forms")
     func listRejectsBadDate() async {
-        let result = await call("recordings_list", ["created_after": .string("last tuesday")])
+        let result = await call("recordings_list", ["from_date": .string("last tuesday")])
         #expect(result.isError)
         #expect(result.text.contains("2026-08-12T09:00:00+02:00"))
     }
@@ -235,7 +239,7 @@ struct VoiceMemosToolsTests {
             ["ids": .array([.string("20260807 181500.m4a"), .string("nope.m4a")])])
         #expect(!result.isError)
         #expect(result.text.contains("Shopping list"))
-        #expect(result.text.contains("Not found: nope.m4a"))
+        #expect(result.text.contains("Not found:\n  nope.m4a"))
     }
 
     @Test("Get with no match at all is an error that explains what an id is")
@@ -293,7 +297,7 @@ struct VoiceMemosToolsTests {
             ["ids": .array([.string("20260807 181500.m4a"), .string("Ideas/20260808 220000.m4a")])],
             configuration: configuration)
         #expect(result.isError)
-        #expect(result.text.contains("the maximum is 1"))
+        #expect(result.text.contains("at most 1 per call"))
     }
 
     @Test("A locale with a recogniser but no model installed yet still transcribes")

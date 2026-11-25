@@ -7,13 +7,18 @@ public enum ToolError: Error, Equatable {
     case missingArgument(String)
     case badArgument(name: String, reason: String)
     case badDate(argument: String, value: String)
-    case tooManyIDs(asked: Int, maximum: Int)
+    case endBeforeStart
+    case tooManyIDs(asked: Int, maximum: Int, adjustable: Bool)
     case notFound(ids: [String])
     case exportRootNotConfigured
     case destinationOutsideRoot(destination: String, root: String)
     case destinationExists(String)
     case transcriptionFailed(id: String, detail: String)
     case storeFailure(String)
+    case unknownTool(String)
+    case unknownArguments([String], allowed: [String])
+    case timedOut(seconds: Int, mayHaveWritten: Bool)
+    case libraryScanTimedOut
 
     public var message: String {
         switch self {
@@ -32,29 +37,69 @@ public enum ToolError: Error, Equatable {
         case .badArgument(let name, let reason):
             return "Argument '\(name)' is not valid: \(reason)"
 
+        case .unknownTool(let name):
+            return "'\(ToolStandard.echo(name))' is not a tool of this server."
+
+        case .unknownArguments(let names, let allowed):
+            let shown = names.prefix(3).map { "'\(ToolStandard.echo($0))'" }.joined(separator: ", ")
+            let more = names.count > 3 ? " and \(names.count - 3) more" : ""
+            let list = allowed.isEmpty ? "none" : allowed.joined(separator: ", ")
+            return "Not an argument of this tool: \(shown)\(more). Allowed: \(list)."
+
+        case .endBeforeStart:
+            return "to_date is before from_date. A date range cannot end before it begins."
+
+        case .timedOut(let seconds, let mayHaveWritten):
+            guard mayHaveWritten else {
+                return """
+                    The call did not finish within \(seconds) seconds and was abandoned. This \
+                    call only reads, so nothing was changed.
+
+                    Try again with fewer ids, or with a narrower listing: a smaller limit, or \
+                    from_date, to_date, folder or name_contains.
+                    """
+            }
+            return """
+                The copy did not finish within \(seconds) seconds and was abandoned, so the \
+                file may still have been written, whole or in part, in the export folder.
+
+                Look for it there before asking again: an existing file is never overwritten, \
+                so pass another destination if it is there.
+                """
+
+        case .libraryScanTimedOut:
+            return """
+                Walking the recording library took too long to find every id that was asked \
+                for, so none could be told apart from a recording that does not exist.
+
+                Ask for fewer ids, or list the recordings first with from_date and to_date \
+                to confirm the ids.
+                """
+
         case .badDate(let argument, let value):
             return """
-                Argument '\(argument)' is not a date this server accepts: '\(value)'
+                Argument '\(argument)' is not a date this server accepts: '\(ToolStandard.echo(value))'
 
                 Use one of:
                 \(DateParsing.acceptedForms)
                 """
 
-        case .tooManyIDs(let asked, let maximum):
+        case .tooManyIDs(let asked, let maximum, let adjustable):
+            let remedy =
+                adjustable
+                ? "Split the list, or raise the limit in Claude Desktop → Settings → Extensions."
+                : "Split the list and call again."
             return """
-                \(asked) recordings were asked for at once; the maximum is \(maximum).
+                \(asked) ids were given; this tool takes at most \(maximum) per call.
 
-                Recognition itself is fast, but a locale's on-device model downloads on
-                first use and a large batch returns as one wall of text. Split the list, or
-                raise the limit in Claude Desktop → Settings → Extensions.
+                \(remedy)
                 """
 
         case .notFound(let ids):
-            let list = ids.map { "  \($0)" }.joined(separator: "\n")
             return """
                 No recording matches:
 
-                \(list)
+                \(Self.listed(ids))
 
                 An id is the file's path relative to the library root, exactly as
                 recordings_list prints it. Renaming or moving a recording changes its id,
@@ -74,7 +119,7 @@ public enum ToolError: Error, Equatable {
 
         case .destinationOutsideRoot(let destination, let root):
             return """
-                '\(destination)' is outside the configured export folder.
+                '\(ToolStandard.echo(destination))' is outside the configured export folder.
 
                 Export folder: \(root)
 
@@ -84,14 +129,14 @@ public enum ToolError: Error, Equatable {
 
         case .destinationExists(let path):
             return """
-                '\(path)' already exists and this server does not overwrite files.
+                '\(ToolStandard.echo(path))' already exists and this server does not overwrite files.
 
                 Pass a different name. Nothing was written.
                 """
 
         case .transcriptionFailed(let id, let detail):
             return """
-                Transcription of '\(id)' failed: \(detail)
+                Transcription of '\(ToolStandard.echo(id))' failed: \(detail.prefix(300))
 
                 Speech recognition gives up on silence and on audio it cannot decode. A
                 missing on-device model would not surface here at all: this server
@@ -100,8 +145,18 @@ public enum ToolError: Error, Equatable {
                 """
 
         case .storeFailure(let detail):
-            return "The recording library returned an error: \(detail)"
+            return "The recording library returned an error: \(detail.prefix(300))"
         }
+    }
+
+    /// Ids as an error or a result may repeat them: each clipped, a few shown, the rest
+    /// counted.
+    /// `whole` is for ids that are this server's own, which a retry needs exactly; an id the
+    /// caller wrote is clipped.
+    static func listed(_ ids: [String], shown: Int = 5, whole: Bool = false) -> String {
+        let lines = ids.prefix(shown).map { "  \(whole ? $0 : ToolStandard.echo($0))" }
+        let more = ids.count > shown ? ["  and \(ids.count - shown) more"] : []
+        return (lines + more).joined(separator: "\n")
     }
 
     static func authorizationMessage(_ status: SpeechAuthorization) -> String {
@@ -152,14 +207,14 @@ public enum ToolError: Error, Equatable {
     static func onDeviceMessage(_ support: OnDeviceSupport) -> String {
         guard support.recognizerExists else {
             return """
-                Speech recognition has no recogniser for '\(support.localeIdentifier)'.
+                Speech recognition has no recogniser for '\(ToolStandard.echo(support.localeIdentifier))'.
 
                 Pass a 'locale' this Mac supports (for example "en-US" or "es-ES"), or set
                 a default in Claude Desktop → Settings → Extensions.
                 """
         }
         return """
-            '\(support.localeIdentifier)' has a recogniser, but this server could not
+            '\(ToolStandard.echo(support.localeIdentifier))' has a recogniser, but this server could not
             arrange to install its on-device model, and it never sends audio to Apple's
             servers as a fallback.
 

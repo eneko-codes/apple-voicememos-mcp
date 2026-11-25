@@ -141,14 +141,25 @@ public struct SystemRecordingStore: RecordingStore {
         return URL(fileURLWithPath: usable.path, isDirectory: true)
     }
 
-    /// Every audio file under the root, newest first, with only the metadata the
-    /// filesystem already holds.
+    /// Why a walk ended before it reached the end of the library.
+    enum ScanStop: Equatable {
+        case ceiling
+        case time
+    }
+
+    /// The audio files under the root that `include` accepts, newest first and then by id,
+    /// with only the metadata the filesystem already holds. The walk stops after
+    /// `limit` matches or `budget` of time, and says which; `stopAfter` ends it cleanly
+    /// once that many matches are found, which is not a stop.
     ///
     /// Duration and name are deliberately NOT read here. Both need the audio file opened,
     /// and doing that for a library of hundreds while answering a question about ten of
     /// them is the difference between a listing that returns and one that appears to
     /// hang. They are loaded for the page that is actually returned.
-    private func walk(_ root: URL) throws -> [(url: URL, relativePath: String, created: Date)] {
+    func walk(
+        _ root: URL, limit: Int, budget: Duration, stopAfter: Int? = nil,
+        include: (_ relativePath: String, _ created: Date) -> Bool
+    ) throws -> (entries: [(url: URL, relativePath: String, created: Date)], stop: ScanStop?) {
         let keys: [URLResourceKey] = [
             .isRegularFileKey, .creationDateKey, .contentModificationDateKey,
         ]
@@ -159,8 +170,14 @@ public struct SystemRecordingStore: RecordingStore {
         else { throw ToolError.libraryUnreachable(libraries()) }
 
         let rootPath = root.standardizedFileURL.path
-        var found: [(URL, String, Date)] = []
+        let deadline = ContinuousClock.now + budget
+        var found: [(url: URL, relativePath: String, created: Date)] = []
+        var stop: ScanStop?
         for case let url as URL in enumerator {
+            if ContinuousClock.now >= deadline {
+                stop = .time
+                break
+            }
             guard Self.audioExtensions.contains(url.pathExtension.lowercased()) else { continue }
             let values = try? url.resourceValues(forKeys: Set(keys))
             guard values?.isRegularFile == true else { continue }
@@ -174,36 +191,37 @@ public struct SystemRecordingStore: RecordingStore {
             // lose the former, and a listing with no date at all is unusable.
             let created =
                 values?.creationDate ?? values?.contentModificationDate ?? Date.distantPast
+            guard include(relative, created) else { continue }
+            if found.count == limit {
+                stop = .ceiling
+                break
+            }
             found.append((url, relative, created))
+            if found.count == stopAfter { break }
         }
-        return found.sorted { $0.2 > $1.2 }
+        found.sort { $0.created == $1.created ? $0.relativePath < $1.relativePath : $0.created > $1.created }
+        return (found, stop)
     }
 
     public func list(_ query: RecordingQuery) async throws -> RecordingPage {
         let root = try libraryRoot()
-        var matches = try walk(root)
-
-        if let folder = query.folder {
-            let wanted = folder == "(root)" ? "" : folder
-            matches = matches.filter { Self.folder(of: $0.relativePath) == wanted }
-        }
-        if let needle = query.nameContains, !needle.isEmpty {
-            matches = matches.filter {
-                Self.stem(of: $0.relativePath).localizedCaseInsensitiveContains(needle)
+        let wantedFolder = query.folder.map { $0 == "(root)" ? "" : $0 }
+        let needle = query.nameContains.flatMap { $0.isEmpty ? nil : $0 }
+        // Every filter is applied while walking, so a narrower question collects fewer
+        // matches and a scan that stops can be resumed by narrowing it.
+        let walked = try walk(root, limit: query.scanLimit, budget: query.scanTime) { relative, created in
+            if let wantedFolder, Self.folder(of: relative) != wantedFolder { return false }
+            if let needle, !Self.stem(of: relative).localizedCaseInsensitiveContains(needle) {
+                return false
             }
+            if let after = query.createdAfter, created < after { return false }
+            if let before = query.createdBefore, created >= before { return false }
+            return true
         }
-        if let after = query.createdAfter {
-            matches = matches.filter { $0.created >= after }
-        }
-        if let before = query.createdBefore {
-            matches = matches.filter { $0.created < before }
-        }
-
-        let total = matches.count
-        let page = matches.dropFirst(query.offset).prefix(query.limit)
+        let matches = walked.entries
 
         var results: [RecordingSummary] = []
-        for entry in page {
+        for entry in matches.dropFirst(query.offset).prefix(query.limit) {
             results.append(
                 RecordingSummary(
                     id: entry.relativePath,
@@ -212,15 +230,27 @@ public struct SystemRecordingStore: RecordingStore {
                     duration: await Self.duration(of: entry.url),
                     folder: Self.folder(of: entry.relativePath)))
         }
-        return RecordingPage(results: results, total: total, libraryPath: root.path)
+        return RecordingPage(
+            results: results, total: matches.count, libraryPath: root.path,
+            scanStoppedAfter: walked.stop == nil ? nil : matches.count)
     }
 
     public func fetch(ids: [String]) async throws -> [RecordingDetail] {
         let root = try libraryRoot()
         // Matched against the enumeration rather than joined onto the root. An id is a
         // relative path, and joining one straight onto a directory is how `../` gets out.
+        // The walk ends as soon as every id is found.
+        let wanted = Set(ids)
+        let walked = try walk(
+            root, limit: .max, budget: Configuration.scanTime, stopAfter: wanted.count
+        ) { relative, _ in wanted.contains(relative) }
+        // A walk cut short by time cannot tell an id that does not exist from one it has
+        // not reached.
+        if walked.stop == .time && walked.entries.count < wanted.count {
+            throw ToolError.libraryScanTimedOut
+        }
         let byID = Dictionary(
-            try walk(root).map { ($0.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
+            walked.entries.map { ($0.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
 
         var details: [RecordingDetail] = []
         for id in ids {

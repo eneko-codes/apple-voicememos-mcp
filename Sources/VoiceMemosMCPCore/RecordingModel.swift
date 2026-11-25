@@ -67,7 +67,8 @@ public struct OnDeviceSupport: Sendable, Equatable {
     }
 }
 
-/// Filters for `recordings_list`. Every field mirrors something the filesystem already
+/// Filters for `recordings_list`. `createdBefore` is exclusive: the tool hands over the first
+/// instant after what `to_date` covers. Every field mirrors something the filesystem already
 /// knows; nothing here is computed or judged.
 public struct RecordingQuery: Sendable, Equatable {
     public var nameContains: String?
@@ -76,11 +77,17 @@ public struct RecordingQuery: Sendable, Equatable {
     public var createdBefore: Date?
     public var limit: Int
     public var offset: Int
+    /// How many matches the store collects, and for how long it walks the library, before
+    /// it stops and says so. Parameters so the tests can reach the ceiling with a handful of
+    /// files.
+    public var scanLimit: Int
+    public var scanTime: Duration
 
     public init(
         nameContains: String? = nil, folder: String? = nil,
         createdAfter: Date? = nil, createdBefore: Date? = nil,
-        limit: Int = 50, offset: Int = 0
+        limit: Int = Configuration.defaultListLimit, offset: Int = 0,
+        scanLimit: Int = Configuration.scanLimit, scanTime: Duration = Configuration.scanTime
     ) {
         self.nameContains = nameContains
         self.folder = folder
@@ -88,6 +95,8 @@ public struct RecordingQuery: Sendable, Equatable {
         self.createdBefore = createdBefore
         self.limit = limit
         self.offset = offset
+        self.scanLimit = scanLimit
+        self.scanTime = scanTime
     }
 }
 
@@ -118,14 +127,21 @@ public struct RecordingSummary: Sendable, Equatable {
 
 public struct RecordingPage: Sendable, Equatable {
     public let results: [RecordingSummary]
-    /// Matches before paging, so a truncated answer can say what it withheld.
+    /// Matches before paging, so a truncated answer can say what it withheld. When the scan
+    /// stopped, only the matches it reached.
     public let total: Int
     public let libraryPath: String
+    /// The number of matches collected when the walk of the library stopped early, or `nil`
+    /// when it reached the end.
+    public let scanStoppedAfter: Int?
 
-    public init(results: [RecordingSummary], total: Int, libraryPath: String) {
+    public init(
+        results: [RecordingSummary], total: Int, libraryPath: String, scanStoppedAfter: Int? = nil
+    ) {
         self.results = results
         self.total = total
         self.libraryPath = libraryPath
+        self.scanStoppedAfter = scanStoppedAfter
     }
 }
 

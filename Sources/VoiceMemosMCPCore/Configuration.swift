@@ -19,21 +19,62 @@ public struct Configuration: Sendable, Equatable {
     /// Recognition locale, e.g. `es-ES`. Empty means the machine's current locale.
     public var localeIdentifier: String?
 
-    public var listLimit: Int = 50
+    /// Default page size of `recordings_list`, a setting within `listLimitRange`.
+    public var listLimit: Int = Configuration.defaultListLimit
 
-    /// Ceiling on one `recording_transcribe` call. Recognition itself is fast, but a first
-    /// use of a locale downloads its on-device model, and an unbounded batch would let one
-    /// call return an unreadable wall of transcript text besides.
+    /// Ceiling on how many recordings one `recording_transcribe` call may take, a setting
+    /// within `transcribeCountRange`. A first use of a locale downloads its on-device
+    /// model, and each recording's transcript is a text of any length.
     public var maximumTranscribeCount: Int = 5
 
     public init() {}
 
-    public static let listLimitRange = 1...200
+    public static let defaultListLimit = 50
+
+    /// One row is about 150 characters, so 100 of them stay near 15,000, inside
+    /// `ToolStandard.longestResult` even with a long id on every row. No setting can raise
+    /// the page above this.
+    public static let listLimitRange = 1...100
     public static let transcribeCountRange = 1...25
+
+    /// Ids one `recording_get` call may take. A record is about 600 characters, and a path
+    /// can add a thousand, so ten stay well inside the longest result.
+    public static let maximumGetIDs = 10
+    public static let getIDsRange = 1...maximumGetIDs
 
     /// Paging ceiling. Declared here so the advertised schema and the enforced clamp
     /// cannot drift: both read this one value.
-    public static let offsetRange = 0...10_000
+    public static let offsetRange = 0...10_000_000
+
+    /// The window on one transcript. The maximum is half the longest result, so one
+    /// transcript of ordinary text leaves room for the rest of the answer;
+    /// `ToolStandard.fitting` makes a window smaller when several transcripts, or
+    /// characters that take several UTF-16 units each, would not fit.
+    public static let maxCharactersRange = 1...(ToolStandard.longestResult / 2)
+
+    /// What a call with no `max_characters` aims to return in all: a usual page, shared by
+    /// the transcripts asked for.
+    public static let defaultMaxCharacters = ToolStandard.usualPage
+
+    /// The window each transcript gets when `max_characters` is not given.
+    public static func defaultWindow(forIDs count: Int) -> Int {
+        Swift.max(defaultMaxCharacters / Swift.max(count, 1), maxCharactersRange.lowerBound)
+    }
+
+    /// Width a recording's name is clipped to in a listing; `recording_get` returns it whole.
+    public static let listNameWidth = 80
+
+    /// The most matching recordings a listing collects before it stops walking the library,
+    /// and the longest it walks. Past either, the result says the scan stopped.
+    public static let scanLimit = 10_000
+    public static let scanTime = Duration.seconds(20)
+
+    /// How long a call may run before it is answered. They stay below
+    /// `ToolStandard.timeLimit`, so the answer is ours and not the client's generic
+    /// "no result". Transcription gets the longest: its work stops at nine tenths of it and
+    /// the transcripts finished by then are returned.
+    public static let timeout = Duration.seconds(45)
+    public static let transcribeTimeout = Duration.seconds(180)
 
     /// True when an argument is an unsubstituted manifest placeholder.
     ///

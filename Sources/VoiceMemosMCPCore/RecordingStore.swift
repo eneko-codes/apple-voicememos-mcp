@@ -19,6 +19,8 @@ public protocol RecordingStore: Sendable {
     /// On-device capability for a locale, asked before a transcription is started.
     func onDeviceSupport(locale: String?) async -> OnDeviceSupport
 
+    /// One page of the matches, newest first and then by id, so no two tie and a page
+    /// boundary falls in the same place on the next call.
     func list(_ query: RecordingQuery) async throws -> RecordingPage
 
     /// Resolves ids to records in one pass, in the order given, silently dropping ids

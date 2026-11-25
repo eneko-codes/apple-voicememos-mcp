@@ -16,7 +16,7 @@ Do not modify, delete or move an existing recording — these are critical data.
 
 A local MCP server (Swift 6, stdio transport) for Voice Memos. Recordings are reached as files on disk (no framework or scripting dictionary exists); transcription uses the on-device `Speech` framework. No network, no cloud API, **no third-party dependency**: `Package.swift` lists none, and the MCP protocol (JSON-RPC over stdio) is `MCPServer.swift` over Foundation. Adding a package needs the owner's say-so.
 
-**`MCPServer.swift`, `Value.swift` and `Tests/…/MCPProtocolTests.swift` are copied unchanged into every one of the owner's MCP servers** (the test file differs only in its `@testable import`). A change to one is made to every copy in the same piece of work; never let a copy drift.
+**`MCPServer.swift`, `Value.swift`, `ToolStandard.swift` and the tests `MCPProtocolTests.swift` and `ToolStandardTests.swift` are copied unchanged into every one of the owner's MCP servers** (the test files differ only in their `@testable import`). A change to one is made to every copy in the same piece of work; never let a copy drift.
 
 ## Apple frameworks
 

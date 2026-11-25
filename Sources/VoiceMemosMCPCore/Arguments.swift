@@ -1,53 +1,85 @@
 import Foundation
 
 /// Typed access to a `tools/call` argument bag.
-public struct Arguments {
+///
+/// A class, not a struct, so that reading a number can also record that it was moved into
+/// its range without every reader having to be `mutating`. One instance serves one call and
+/// never leaves it. The tool puts `notices` before the data.
+public final class Arguments {
     private let values: [String: Value]
     private let calendar: Calendar
 
-    public init(_ values: [String: Value]?, calendar: Calendar) {
+    /// One sentence for each number that was moved into its range, in the order read.
+    public private(set) var notices: [String] = []
+
+    /// Refuses an argument the tool does not declare, so that a call still using a name
+    /// that was renamed fails instead of running without it.
+    public init(_ values: [String: Value]?, calendar: Calendar, allowed: [String]) throws {
         self.values = values ?? [:]
         self.calendar = calendar
+        let unknown = self.values.keys.filter { !allowed.contains($0) }.sorted()
+        if !unknown.isEmpty { throw ToolError.unknownArguments(unknown, allowed: allowed) }
+    }
+
+    /// `nil` when the argument is absent or null, which mean the same: not given.
+    private func given(_ name: String) -> Value? {
+        guard let raw = values[name], !raw.isNull else { return nil }
+        return raw
     }
 
     // MARK: Scalars
 
     public func requiredString(_ name: String) throws -> String {
-        guard let raw = values[name]?.stringValue else { throw ToolError.missingArgument(name) }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw ToolError.badArgument(name: name, reason: "it is empty")
+        guard let text = try optionalString(name) else {
+            if given(name) != nil { throw ToolError.badArgument(name: name, reason: "it is empty") }
+            throw ToolError.missingArgument(name)
         }
-        return trimmed
+        return text
     }
 
-    public func optionalString(_ name: String) -> String? {
-        guard let text = values[name]?.stringValue else { return nil }
+    /// Empty text is "not given", as it is for every other text argument. A value that is
+    /// not text is refused, not ignored.
+    public func optionalString(_ name: String) throws -> String? {
+        guard let raw = given(name) else { return nil }
+        guard let text = raw.stringValue else {
+            throw ToolError.badArgument(name: name, reason: "text was expected")
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Clamps rather than rejects: a model asking for 500 results means "as many as you
-    /// will give me".
+    /// A quantity: a size, a count, an offset. Outside its range it is moved to the nearest
+    /// allowed value, and `notices` gains the sentence that says which value was used.
     public func int(_ name: String, default fallback: Int, in range: ClosedRange<Int>) throws
         -> Int
     {
-        guard let raw = values[name] else { return fallback }
+        guard let raw = given(name) else { return fallback }
         guard let number = raw.intValue else {
-            throw ToolError.badArgument(name: name, reason: "an integer was expected")
+            throw ToolError.badArgument(name: name, reason: "a whole number was expected")
         }
-        return Swift.min(Swift.max(number, range.lowerBound), range.upperBound)
+        return ToolStandard.clamp(number, to: range, argument: name, notices: &notices)
+    }
+
+    /// The `limit` and `offset` of a listing.
+    public func page(defaultLimit: Int, limits: ClosedRange<Int>) throws -> (limit: Int, offset: Int) {
+        (
+            try int("limit", default: defaultLimit, in: limits),
+            try int("offset", default: 0, in: Configuration.offsetRange)
+        )
     }
 
     public func stringArray(_ name: String) throws -> [String] {
-        guard let raw = values[name] else { return [] }
-        if case .null = raw { return [] }
+        guard let raw = given(name) else { return [] }
         // A single string where an array is expected is a common and harmless slip.
         if let single = raw.stringValue { return [single] }
         guard let entries = raw.arrayValue else {
             throw ToolError.badArgument(name: name, reason: "an array of strings was expected")
         }
-        return entries.compactMap(\.stringValue)
+        let texts = entries.compactMap(\.stringValue)
+        guard texts.count == entries.count else {
+            throw ToolError.badArgument(name: name, reason: "an array of strings was expected")
+        }
+        return texts
     }
 
     /// Ids, de-duplicated with the first occurrence's position kept.
@@ -65,19 +97,9 @@ public struct Arguments {
 
     // MARK: Dates
 
+    /// Absent, empty and `null` all mean "no bound on this side of the range".
     public func optionalDate(_ name: String) throws -> ParsedDate? {
-        guard let raw = optionalString(name) else { return nil }
-        return try DateParsing.parse(raw, argument: name, calendar: calendar)
-    }
-
-    /// The exclusive end of a range.
-    ///
-    /// A plain day means the whole of it, so `created_before: 2026-08-12` includes
-    /// everything recorded on the 12th. Read literally it would exclude the entire day,
-    /// which makes a single-day window return nothing at all.
-    public func rangeEnd(_ name: String) throws -> Date? {
-        guard let parsed = try optionalDate(name) else { return nil }
-        guard parsed.isDateOnly else { return parsed.date }
-        return calendar.date(byAdding: .day, value: 1, to: parsed.date) ?? parsed.date
+        guard let text = try optionalString(name) else { return nil }
+        return try DateParsing.parse(text, argument: name, calendar: calendar)
     }
 }
